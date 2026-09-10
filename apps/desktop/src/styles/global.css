@@ -1,0 +1,177 @@
+/* ============================================================
+   OpenDAM Design System — Global CSS
+   ============================================================ */
+
+/* ── Imports ─────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── Design Tokens ───────────────────────────────────── */
+:root {
+  /* Brand palette */
+  --color-brand-50:  hsl(220 100% 96%);
+  --color-brand-100: hsl(220 96%  90%);
+  --color-brand-200: hsl(220 94%  80%);
+  --color-brand-300: hsl(220 90%  68%);
+  --color-brand-400: hsl(220 88%  58%);
+  --color-brand-500: hsl(220 85%  50%);
+  --color-brand-600: hsl(220 82%  42%);
+
+  /* Neutral palette (dark mode) */
+  --color-bg-base:       hsl(220 14% 9%);
+  --color-bg-surface:    hsl(220 13% 12%);
+  --color-bg-elevated:   hsl(220 12% 16%);
+  --color-bg-overlay:    hsl(220 11% 21%);
+  --color-bg-hover:      hsl(220 10% 25%);
+
+  /* Borders */
+  --color-border:        hsl(220 10% 22%);
+  --color-border-focus:  hsl(220 85% 55%);
+
+  /* Text */
+  --color-text-primary:  hsl(220  8% 96%);
+  --color-text-secondary:hsl(220  8% 65%);
+  --color-text-muted:    hsl(220  8% 42%);
+  --color-text-disabled: hsl(220  8% 30%);
+
+  /* Semantic */
+  --color-success:  hsl(145 64% 44%);
+  --color-warning:  hsl( 38 92% 54%);
+  --color-danger:   hsl(  4 84% 55%);
+  --color-info:     hsl(200 84% 55%);
+
+  /* Tag accent swatches */
+  --swatch-red:     hsl(  4 80% 50%);
+  --swatch-orange:  hsl( 25 90% 52%);
+  --swatch-yellow:  hsl( 45 95% 50%);
+  --swatch-green:   hsl(140 64% 44%);
+  --swatch-teal:    hsl(178 64% 42%);
+  --swatch-blue:    hsl(213 84% 52%);
+  --swatch-purple:  hsl(268 72% 58%);
+  --swatch-pink:    hsl(328 80% 58%);
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 2px hsl(220 20% 4% / 0.4);
+  --shadow-md:  0 4px 12px hsl(220 20% 4% / 0.5);
+  --shadow-lg:  0 8px 24px hsl(220 20% 4% / 0.6);
+  --shadow-xl:  0 16px 48px hsl(220 20% 4% / 0.7);
+
+  /* Transitions */
+  --transition-fast:   120ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow:   320ms ease;
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --detail-panel-width: 320px;
+  --toolbar-height: 48px;
+  --statusbar-height: 28px;
+}
+
+/* ── Reset ───────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  background: var(--color-bg-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-bg-overlay); border-radius: var(--radius-full); }
+::-webkit-scrollbar-thumb:hover { background: var(--color-bg-hover); }
+
+/* Selection */
+::selection { background: hsl(220 85% 50% / 0.35); }
+
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/* ── Utility classes ─────────────────────────────────── */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flex-center { display: flex; align-items: center; justify-content: center; }
+.flex-between { display: flex; align-items: center; justify-content: space-between; }
+
+/* ── Animations ──────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position:  200% 0; }
+}
+
+.animate-fadein  { animation: fadeIn 200ms ease forwards; }
+.animate-spin    { animation: spin 1s linear infinite; }
+.animate-pulse   { animation: pulse 2s ease infinite; }
+
+/* Skeleton loading shimmer */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-elevated) 25%,
+    var(--color-bg-overlay) 50%,
+    var(--color-bg-elevated) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Glassmorphism card ───────────────────────────────── */
+.glass {
+  background: hsl(220 13% 14% / 0.8);
+  backdrop-filter: blur(16px);
+  border: 1px solid hsl(220 15% 25% / 0.5);
+}

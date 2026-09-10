@@ -1,0 +1,236 @@
+.toolbar {
+  height: var(--toolbar-height);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  /* Tauri drag region for custom title bar */
+  -webkit-app-region: drag;
+}
+
+/* No-drag regions within the toolbar */
+.brand, .searchContainer, .searchWrap, .controls {
+  -webkit-app-region: no-drag;
+}
+
+/* Brand */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.logo {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.logo svg { width: 100%; height: 100%; }
+
+.appName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  letter-spacing: 0.02em;
+}
+
+/* Search Container & Subcollection Checkbox */
+.searchContainer {
+  flex: 1;
+  max-width: 720px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.subcollectionsCheckboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.subcollectionsCheckboxLabel:hover {
+  background: var(--color-bg-overlay);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+.subcollectionsCheckboxActive {
+  color: var(--color-brand-300);
+  border-color: hsl(220 85% 50% / 0.4);
+  background: hsl(220 85% 50% / 0.08);
+}
+
+.subcollectionsCheckboxInput {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+
+.subcollectionsCheckboxCustom {
+  width: 15px;
+  height: 15px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--color-border-hover);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-base);
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.subcollectionsCheckboxActive .subcollectionsCheckboxCustom {
+  background: var(--color-brand-500);
+  border-color: var(--color-brand-500);
+  color: #fff;
+}
+
+.subcollectionsCheckboxCustom svg {
+  width: 11px;
+  height: 11px;
+}
+
+.subcollectionsCheckboxText {
+  font-weight: 500;
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+}
+
+/* Search */
+.searchWrap {
+  flex: 1;
+  position: relative;
+  max-width: 560px;
+  display: flex;
+  align-items: center;
+}
+
+.searchIcon {
+  position: absolute;
+  left: var(--space-3);
+  color: var(--color-text-muted);
+  pointer-events: none;
+  width: 16px;
+  height: 16px;
+}
+
+.searchInput {
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--space-8) 0 36px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.searchInput::placeholder { color: var(--color-text-muted); }
+.searchInput:focus {
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: 0 0 0 3px hsl(220 85% 50% / 0.15);
+}
+.searchInput::-webkit-search-cancel-button { display: none; }
+
+.spinner {
+  position: absolute;
+  right: var(--space-3);
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-brand-400);
+  border-radius: 50%;
+}
+
+/* Controls */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.buttonGroup {
+  display: flex;
+  align-items: center;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.iconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.iconBtn:hover {
+  background: var(--color-bg-overlay);
+  color: var(--color-text-primary);
+}
+.iconBtn.active {
+  background: hsl(220 85% 50% / 0.15);
+  color: var(--color-brand-300);
+}
+.iconBtn.dimmed {
+  color: var(--color-text-disabled);
+}
+
+.gridSizeDot {
+  line-height: 1;
+}
+
+.divider {
+  width: 1px;
+  height: 20px;
+  background: var(--color-border);
+  margin: 0 var(--space-1);
+}
+
+.primaryBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--color-brand-500);
+  border: none;
+  border-radius: var(--radius-md);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+.primaryBtn:hover { background: var(--color-brand-400); transform: translateY(-1px); }
+.primaryBtn:active { transform: translateY(0); }
+.primaryBtn svg { width: 14px; height: 14px; }

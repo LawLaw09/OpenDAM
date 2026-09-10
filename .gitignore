@@ -1,0 +1,89 @@
+# ── Dependencies ───────────────────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+
+# ── Build Artifacts ────────────────────────────────────────────────────────
+dist/
+build/
+target/
+.next/
+out/
+bundle/
+gen/
+.tauri/
+*.tsbuildinfo
+
+# ── Rust & Cargo ───────────────────────────────────────────────────────────
+*.rs.bk
+Cargo.lock
+
+# ── Python & Preview Worker ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+packages/preview-engine/venv/
+
+# ── Environment & Local Config ─────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── User Data, Databases & Libraries (NEVER COMMIT) ────────────────────────
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.bak
+opendam-data/
+.opendam/
+thumbs/
+assets/
+New folder*/
+scratch/
+*.log
+
+# ── CAD, 3D & Proprietary Binaries ─────────────────────────────────────────
+*.max
+*.rvt
+*.rfa
+*.dwg
+*.dxf
+*.skp
+*.blend
+*.c4d
+*.3dm
+*.obj
+*.fbx
+*.3ds
+*.dae
+*.gltf
+*.glb
+*.stl
+*.abc
+*.ply
+*.hdr
+*.exr
+*.ies
+*.mat
+*.vrmat
+*.sbsar
+
+# ── Scratch / Local Test Scripts ───────────────────────────────────────────
+check_db.py
+queue_previews.py
+
+# ── OS Generated Files ─────────────────────────────────────────────────────
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+Desktop.ini
+[Dd]esktop.ini
+.DS_Store
+.Spotlight-V100
+.Trashes

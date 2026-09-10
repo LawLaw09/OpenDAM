@@ -1,0 +1,128 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+  animation: fadeIn 150ms ease both;
+}
+.card:hover {
+  border-color: hsl(220 10% 32%);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.card.selected {
+  border-color: var(--color-brand-400);
+  box-shadow: 0 0 0 2px hsl(220 85% 50% / 0.25), var(--shadow-md);
+}
+
+/* Thumbnail */
+.thumb {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--color-bg-elevated);
+  overflow: hidden;
+}
+.thumbImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--transition-slow);
+}
+.card:hover .thumbImg { transform: scale(1.04); }
+
+.thumbPlaceholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-disabled);
+  background: var(--color-bg-elevated);
+}
+
+/* Overlay badges */
+.previewBadge {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.generating {
+  background: hsl(220 85% 50% / 0.9);
+  color: #fff;
+}
+.error {
+  background: hsl(4 84% 55% / 0.9);
+  color: #fff;
+}
+
+.colorStripe {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
+.kindChip {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  background: hsl(220 14% 9% / 0.75);
+  backdrop-filter: blur(4px);
+  border-radius: var(--radius-sm);
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+/* Card body */
+.body {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.stars {
+  display: flex;
+  gap: 1px;
+}
+.star { color: var(--color-text-disabled); }
+.starFilled { color: var(--color-warning); }
+
+.size {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}

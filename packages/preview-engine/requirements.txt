@@ -1,0 +1,5 @@
+Pillow>=10.4.0
+olefile>=0.46          # Phase 2: .max thumbnail extraction
+pyassimp>=4.1.6        # Phase 2: 3D model loading
+OpenImageIO>=2.5.0     # Phase 2: EXR, HDR, PSD
+trimesh>=4.4.0         # Phase 2: geometry analysis
