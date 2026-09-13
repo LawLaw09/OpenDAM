@@ -298,3 +298,129 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Segmented control for Any / None / Specific */
+.segmentedControl {
+  display: flex;
+  background: var(--color-bg-base);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 2px;
+}
+
+.segmentBtn {
+  flex: 1;
+  padding: 5px 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: center;
+}
+
+.segmentBtn:hover {
+  color: var(--color-text-primary);
+}
+
+.segmentBtnActive {
+  background: var(--color-bg-elevated);
+  color: var(--color-brand-300, hsl(220 90% 75%));
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* Logic toggle (AND vs OR) */
+.logicBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.logicToggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--color-bg-base);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  padding: 2px;
+  gap: 2px;
+}
+
+.logicBtn {
+  padding: 2px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.logicBtnActive {
+  background: var(--color-brand-500, hsl(220 85% 55%));
+  color: #fff;
+}
+
+/* Scrollable multi-select container */
+.multiSelectBox {
+  max-height: 140px;
+  overflow-y: auto;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.multiSelectItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  user-select: none;
+}
+
+.multiSelectItem:hover {
+  background: hsl(220 14% 18%);
+  color: var(--color-text-primary);
+}
+
+.multiSelectItemActive {
+  background: hsl(220 85% 55% / 0.15);
+  color: var(--color-brand-300);
+  font-weight: 500;
+}
+
+.itemPath {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parentPart {
+  color: var(--color-text-disabled);
+  font-size: 11px;
+}
+
+.leafPart {
+  color: var(--color-text-primary);
+}
+

@@ -175,11 +175,64 @@ impl Database {
         let fallback_pool = first_pool.unwrap_or_else(|| master_pool.clone());
         let libraries = Arc::new(RwLock::new(open_libraries));
 
-        Ok(Self {
+        let db = Self {
             master_pool,
             libraries,
             pool: fallback_pool,
-        })
+        };
+
+        // Sync metadata across all open libraries
+        for lib in db.get_all_libraries().await {
+            db.sync_library_metadata(&lib.pool).await;
+        }
+
+        Ok(db)
+    }
+
+    pub async fn sync_library_metadata(&self, lib_pool: &Pool<Sqlite>) {
+        // 1. Sync tags from master_pool to lib_pool
+        if let Ok(tags) = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
+            "SELECT id, name, color, parent_id FROM tags"
+        ).fetch_all(&self.master_pool).await {
+            for (id, name, color, parent_id) in tags {
+                let _ = sqlx::query("INSERT OR IGNORE INTO tags (id, name, color, parent_id) VALUES (?, ?, ?, ?)")
+                    .bind(&id).bind(&name).bind(&color).bind(&parent_id)
+                    .execute(lib_pool).await;
+            }
+        }
+
+        // 2. Sync tags from lib_pool to master_pool
+        if let Ok(tags) = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
+            "SELECT id, name, color, parent_id FROM tags"
+        ).fetch_all(lib_pool).await {
+            for (id, name, color, parent_id) in tags {
+                let _ = sqlx::query("INSERT OR IGNORE INTO tags (id, name, color, parent_id) VALUES (?, ?, ?, ?)")
+                    .bind(&id).bind(&name).bind(&color).bind(&parent_id)
+                    .execute(&self.master_pool).await;
+            }
+        }
+
+        // 3. Sync collections from master_pool to lib_pool
+        if let Ok(cols) = sqlx::query_as::<_, (String, String, String, Option<String>, bool, Option<String>, i64)>(
+            "SELECT id, name, description, parent_id, is_smart, filter_spec, created_at FROM collections"
+        ).fetch_all(&self.master_pool).await {
+            for (id, name, desc, parent_id, is_smart, filter_spec, created_at) in cols {
+                let _ = sqlx::query("INSERT OR IGNORE INTO collections (id, name, description, parent_id, is_smart, filter_spec, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                    .bind(&id).bind(&name).bind(&desc).bind(&parent_id).bind(is_smart).bind(&filter_spec).bind(created_at)
+                    .execute(lib_pool).await;
+            }
+        }
+
+        // 4. Sync collections from lib_pool to master_pool
+        if let Ok(cols) = sqlx::query_as::<_, (String, String, String, Option<String>, bool, Option<String>, i64)>(
+            "SELECT id, name, description, parent_id, is_smart, filter_spec, created_at FROM collections"
+        ).fetch_all(lib_pool).await {
+            for (id, name, desc, parent_id, is_smart, filter_spec, created_at) in cols {
+                let _ = sqlx::query("INSERT OR IGNORE INTO collections (id, name, description, parent_id, is_smart, filter_spec, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                    .bind(&id).bind(&name).bind(&desc).bind(&parent_id).bind(is_smart).bind(&filter_spec).bind(created_at)
+                    .execute(&self.master_pool).await;
+            }
+        }
     }
 
     pub async fn register_library(&self, id: &str, name: &str, root_path: &Path) -> Result<LibraryHandle> {
@@ -189,6 +242,9 @@ impl Database {
 
         let lib_db_file = opendam_dir.join("library.sqlite");
         let lib_pool = connect_library_sqlite(&lib_db_file).await?;
+
+        // Sync metadata immediately
+        self.sync_library_metadata(&lib_pool).await;
 
         let handle = LibraryHandle {
             id: id.to_string(),

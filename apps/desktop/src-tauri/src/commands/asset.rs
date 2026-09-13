@@ -100,48 +100,96 @@ pub async fn search_assets(
         }
     }
 
-    // Tag filter via subquery
-    if let Some(tags) = &f.tags {
+    // Tag filter: supports logic "and" (has all tags), "or" (has any tag), "none" (untagged)
+    let tag_logic = f.tag_logic.as_deref().unwrap_or("or");
+    if tag_logic == "none" {
+        conditions.push("a.id NOT IN (SELECT asset_id FROM asset_tags)".into());
+    } else if let Some(tags) = &f.tags {
         if !tags.is_empty() {
-            let placeholders = tags.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            conditions.push(format!(
-                "a.id IN (SELECT asset_id FROM asset_tags WHERE tag_id IN ({}))",
-                placeholders
-            ));
-            binds.extend(tags.clone());
+            if tag_logic == "and" {
+                let placeholders = tags.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                conditions.push(format!(
+                    "a.id IN (SELECT asset_id FROM asset_tags WHERE tag_id IN ({}) GROUP BY asset_id HAVING COUNT(DISTINCT tag_id) = ?)",
+                    placeholders
+                ));
+                binds.extend(tags.clone());
+                binds.push(tags.len().to_string());
+            } else {
+                let placeholders = tags.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                conditions.push(format!(
+                    "a.id IN (SELECT asset_id FROM asset_tags WHERE tag_id IN ({}))",
+                    placeholders
+                ));
+                binds.extend(tags.clone());
+            }
         }
     }
 
-    // Collection filter (including subcollections if include_subcollections is true or unset)
-    let col_filter = payload.query.collection_id.as_ref().or(f.collection_id.as_ref());
-    if let Some(col_id) = col_filter {
-        if !col_id.is_empty() {
-            let include_sub = f.include_subcollections.unwrap_or_else(|| payload.query.include_subcollections.unwrap_or(true));
+    // Collection filter: supports multi-collection, subcollections, logic "and" (in all), "or" (in any), "none" (unorganized)
+    let mut target_collections: Vec<String> = Vec::new();
+    if let Some(col_id) = payload.query.collection_id.as_ref().or(f.collection_id.as_ref()) {
+        if !col_id.is_empty() && !target_collections.contains(col_id) {
+            target_collections.push(col_id.clone());
+        }
+    }
+    if let Some(cols) = &f.collection_ids {
+        for cid in cols {
+            if !cid.is_empty() && !target_collections.contains(cid) {
+                target_collections.push(cid.clone());
+            }
+        }
+    }
+
+    let col_logic = f.collection_logic.as_deref().unwrap_or("or");
+    let include_sub = f.include_subcollections.unwrap_or_else(|| payload.query.include_subcollections.unwrap_or(true));
+
+    if col_logic == "none" || f.unorganized == Some(true) {
+        conditions.push("a.id NOT IN (SELECT asset_id FROM collection_assets)".into());
+    } else if !target_collections.is_empty() {
+        if col_logic == "and" {
+            for cid in &target_collections {
+                if include_sub {
+                    conditions.push(
+                        "a.id IN (
+                            WITH RECURSIVE col_tree AS (
+                                SELECT id FROM collections WHERE id = ?
+                                UNION ALL
+                                SELECT c.id FROM collections c JOIN col_tree ct ON c.parent_id = ct.id
+                            )
+                            SELECT asset_id FROM collection_assets WHERE collection_id IN (SELECT id FROM col_tree)
+                        )".into()
+                    );
+                } else {
+                    conditions.push(
+                        "a.id IN (SELECT asset_id FROM collection_assets WHERE collection_id = ?)".into()
+                    );
+                }
+                binds.push(cid.clone());
+            }
+        } else {
             if include_sub {
-                conditions.push(
+                let placeholders = target_collections.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                conditions.push(format!(
                     "a.id IN (
                         WITH RECURSIVE col_tree AS (
-                            SELECT id FROM collections WHERE id = ?
+                            SELECT id FROM collections WHERE id IN ({})
                             UNION ALL
                             SELECT c.id FROM collections c JOIN col_tree ct ON c.parent_id = ct.id
                         )
                         SELECT asset_id FROM collection_assets WHERE collection_id IN (SELECT id FROM col_tree)
-                    )".into()
-                );
+                    )",
+                    placeholders
+                ));
+                binds.extend(target_collections);
             } else {
-                conditions.push(
-                    "a.id IN (SELECT asset_id FROM collection_assets WHERE collection_id = ?)".into()
-                );
+                let placeholders = target_collections.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                conditions.push(format!(
+                    "a.id IN (SELECT asset_id FROM collection_assets WHERE collection_id IN ({}))",
+                    placeholders
+                ));
+                binds.extend(target_collections);
             }
-            binds.push(col_id.clone());
         }
-    }
-
-    // Unorganized / Uncategorized filter: assets not in any collection
-    if let Some(true) = f.unorganized {
-        conditions.push(
-            "a.id NOT IN (SELECT asset_id FROM collection_assets)".into()
-        );
     }
 
     // Smart filter conditions
@@ -360,10 +408,24 @@ pub async fn update_asset(
         sqlx::query("DELETE FROM asset_tags WHERE asset_id = ?")
             .bind(&id).execute(pool).await.map_err(|e| e.to_string())?;
         for tag_id in &tags {
-            let _ = sqlx::query("INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)")
-                .bind(tag_id).bind(tag_id).execute(pool).await;
+            let tag_def = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
+                "SELECT id, name, color, parent_id FROM tags WHERE id = ?"
+            )
+            .bind(tag_id)
+            .fetch_optional(&state.db.master_pool).await.unwrap_or(None);
+
+            if let Some((tid, tname, tcolor, tparent)) = tag_def {
+                let _ = sqlx::query("INSERT OR IGNORE INTO tags (id, name, color, parent_id) VALUES (?, ?, ?, ?)")
+                    .bind(&tid).bind(&tname).bind(&tcolor).bind(&tparent)
+                    .execute(pool).await;
+            } else {
+                let _ = sqlx::query("INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)")
+                    .bind(tag_id).bind(tag_id)
+                    .execute(pool).await;
+            }
+
             sqlx::query("INSERT OR IGNORE INTO asset_tags (asset_id, tag_id) VALUES (?, ?)")
-                .bind(&id).bind(tag_id).execute(pool).await.map_err(|e| e.to_string())?;
+                .bind(&id).bind(tag_id).execute(pool).await.map_err(|e| format!("Failed to assign tag: {}", e))?;
         }
     }
 

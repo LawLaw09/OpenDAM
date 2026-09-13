@@ -97,7 +97,10 @@ export interface FilterSpec {
   directory?: string;
   namePrefix?: string;
   nameSuffix?: string;
+  tagLogic?: 'and' | 'or' | 'none';
   collectionId?: string;
+  collectionIds?: string[];
+  collectionLogic?: 'and' | 'or' | 'none';
   includeSubcollections?: boolean;
 }
 

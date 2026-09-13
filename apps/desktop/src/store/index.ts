@@ -317,6 +317,24 @@ export const useCollectionStore = create<CollectionStore>()((set) => ({
           : c
       ),
     }));
+    useAssetStore.setState((s) => {
+      const assets = s.assets.map((a) => {
+        if (assetIds.includes(a.id)) {
+          const cur = a.collections ?? [];
+          return { ...a, collections: [...new Set([...cur, collectionId])] };
+        }
+        return a;
+      });
+      const assetMap = new Map(s.assetMap);
+      for (const aid of assetIds) {
+        const a = assetMap.get(aid);
+        if (a) {
+          const cur = a.collections ?? [];
+          assetMap.set(aid, { ...a, collections: [...new Set([...cur, collectionId])] });
+        }
+      }
+      return { assets, assetMap };
+    });
   },
 
   removeFromCollection: async (collectionId, assetIds) => {
@@ -328,6 +346,24 @@ export const useCollectionStore = create<CollectionStore>()((set) => ({
           : c
       ),
     }));
+    useAssetStore.setState((s) => {
+      const assets = s.assets.map((a) => {
+        if (assetIds.includes(a.id)) {
+          const cur = a.collections ?? [];
+          return { ...a, collections: cur.filter((cid) => cid !== collectionId) };
+        }
+        return a;
+      });
+      const assetMap = new Map(s.assetMap);
+      for (const aid of assetIds) {
+        const a = assetMap.get(aid);
+        if (a) {
+          const cur = a.collections ?? [];
+          assetMap.set(aid, { ...a, collections: cur.filter((cid) => cid !== collectionId) });
+        }
+      }
+      return { assets, assetMap };
+    });
   },
 
   deleteCollection: async (id) => {

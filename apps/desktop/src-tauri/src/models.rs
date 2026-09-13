@@ -192,8 +192,14 @@ pub struct FilterSpec {
     pub name_prefix: Option<String>,
     #[serde(rename = "nameSuffix")]
     pub name_suffix: Option<String>,
+    #[serde(rename = "tagLogic")]
+    pub tag_logic: Option<String>,
     #[serde(rename = "collectionId")]
     pub collection_id: Option<String>,
+    #[serde(rename = "collectionIds")]
+    pub collection_ids: Option<Vec<String>>,
+    #[serde(rename = "collectionLogic")]
+    pub collection_logic: Option<String>,
     #[serde(rename = "includeSubcollections")]
     pub include_subcollections: Option<bool>,
 }
