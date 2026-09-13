@@ -185,6 +185,7 @@ pub struct FilterSpec {
     #[serde(rename = "colorLabels")]
     pub color_labels: Option<Vec<String>>,
     pub extensions: Option<Vec<String>>,
+    pub unorganized: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

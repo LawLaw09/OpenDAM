@@ -92,6 +92,7 @@ export interface FilterSpec {
   dateRange?: { from?: number; to?: number };
   extensions?: string[];
   previewStatus?: Asset['previewStatus'];
+  unorganized?: boolean;
 }
 
 export interface SearchQuery {

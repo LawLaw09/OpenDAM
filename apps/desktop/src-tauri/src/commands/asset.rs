@@ -132,6 +132,13 @@ pub async fn search_assets(
         }
     }
 
+    // Unorganized / Uncategorized filter: assets not in any collection
+    if let Some(true) = f.unorganized {
+        conditions.push(
+            "a.id NOT IN (SELECT asset_id FROM collection_assets)".into()
+        );
+    }
+
     let where_clause = if conditions.is_empty() {
         String::new()
     } else {

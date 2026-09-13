@@ -5,11 +5,11 @@ import {
   useLibraryStore, useCollectionStore, useTagStore,
   useUIStore, useAssetStore,
 } from '../../store';
-import type { AssetKind, FilterSpec } from '../../types';
+import type { FilterSpec } from '../../types';
 import {
   IconFolder, IconCollection, IconTag,
   IconChevronDown, IconChevronRight, IconPlus,
-  IconCheck, IconX, IconTrash,
+  IconCheck, IconX, IconTrash, IconInbox,
 } from '../Icons';
 import { ConfirmDeleteDialog } from '../ConfirmDeleteDialog';
 import styles from './Sidebar.module.css';
@@ -32,6 +32,7 @@ export function Sidebar() {
   const setFilter = useAssetStore((s) => s.setFilter);
   const clearFilter = useAssetStore((s) => s.clearFilter);
   const setQuery = useAssetStore((s) => s.setQuery);
+  const currentFilter = useAssetStore((s) => s.query.filter);
   const activeTagId = useAssetStore((s) => s.query.filter.tags?.[0] ?? null);
   const search = useAssetStore((s) => s.search);
 
@@ -591,25 +592,36 @@ export function Sidebar() {
         onToggle={() => toggle('filters')}
       >
         {[
-          { label: 'All assets', filter: {} as Partial<FilterSpec> },
-          { label: '3D Models', filter: { kinds: ['3d_model' as const] as AssetKind[] } },
-          { label: 'Materials', filter: { kinds: ['material' as const] as AssetKind[] } },
-          { label: 'Textures', filter: { kinds: ['texture' as const] as AssetKind[] } },
-          { label: 'HDRI', filter: { kinds: ['hdri' as const] as AssetKind[] } },
-          { label: 'Images', filter: { kinds: ['image' as const] as AssetKind[] } },
-          { label: 'Video', filter: { kinds: ['video' as const] as AssetKind[] } },
-        ].map(({ label, filter }) => (
-          <button
-            key={label}
-            className={styles.item}
-            onClick={() => {
-              setFilter(filter);
-              search();
-            }}
-          >
-            <span className={clsx(styles.itemName, 'truncate')}>{label}</span>
-          </button>
-        ))}
+          { label: 'All assets', filter: { kinds: undefined, unorganized: undefined } as Partial<FilterSpec>, isAll: true },
+          { label: 'Unorganized', filter: { kinds: undefined, unorganized: true } as Partial<FilterSpec>, isUnorganized: true },
+          { label: '3D Models', filter: { kinds: ['3d_model' as const], unorganized: undefined } as Partial<FilterSpec> },
+          { label: 'Materials', filter: { kinds: ['material' as const], unorganized: undefined } as Partial<FilterSpec> },
+          { label: 'Textures', filter: { kinds: ['texture' as const], unorganized: undefined } as Partial<FilterSpec> },
+          { label: 'HDRI', filter: { kinds: ['hdri' as const], unorganized: undefined } as Partial<FilterSpec> },
+          { label: 'Images', filter: { kinds: ['image' as const], unorganized: undefined } as Partial<FilterSpec> },
+          { label: 'Video', filter: { kinds: ['video' as const], unorganized: undefined } as Partial<FilterSpec> },
+        ].map(({ label, filter, isAll, isUnorganized }) => {
+          const isActive = isUnorganized
+            ? Boolean(currentFilter.unorganized)
+            : isAll
+            ? !currentFilter.unorganized && (!currentFilter.kinds || currentFilter.kinds.length === 0)
+            : currentFilter.kinds?.length === 1 && currentFilter.kinds[0] === filter.kinds?.[0] && !currentFilter.unorganized;
+
+          return (
+            <button
+              key={label}
+              id={`sidebar-filter-${label.toLowerCase().replace(/\s+/g, '-')}`}
+              className={clsx(styles.item, isActive && styles.active)}
+              onClick={() => {
+                setFilter(filter);
+                search();
+              }}
+            >
+              {isUnorganized && <IconInbox size={13} />}
+              <span className={clsx(styles.itemName, 'truncate')}>{label}</span>
+            </button>
+          );
+        })}
       </SidebarSection>
 
       <ConfirmDeleteDialog

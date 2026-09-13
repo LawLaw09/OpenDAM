@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAssetStore } from '../../store';
 import type { AssetKind, ColorLabel } from '../../types';
-import { IconFilter, IconX, IconLayers, IconFileText } from '../Icons';
+import { IconFilter, IconX, IconLayers, IconFileText, IconInbox } from '../Icons';
 import styles from './FilterBar.module.css';
 import clsx from 'clsx';
 
@@ -78,7 +78,8 @@ export function FilterBar() {
     (filter.kinds?.length ?? 0) > 0 ||
     (filter.colorLabels?.length ?? 0) > 0 ||
     filter.rating !== undefined ||
-    (filter.extensions?.length ?? 0) > 0;
+    (filter.extensions?.length ?? 0) > 0 ||
+    Boolean(filter.unorganized);
 
   const activeExtCount = filter.extensions?.length ?? 0;
 
@@ -88,6 +89,11 @@ export function FilterBar() {
       ? current.filter((k) => k !== kind)
       : [...current, kind];
     setFilter({ kinds: next.length ? next : undefined });
+    search();
+  };
+
+  const toggleUnorganized = () => {
+    setFilter({ unorganized: filter.unorganized ? undefined : true });
     search();
   };
 
@@ -138,6 +144,7 @@ export function FilterBar() {
       colorLabels: undefined,
       rating: undefined,
       extensions: undefined,
+      unorganized: undefined,
     });
     search();
   };
@@ -151,6 +158,15 @@ export function FilterBar() {
 
           {/* Kind pills */}
           <div className={styles.pills}>
+            <button
+              id="filter-unorganized"
+              className={clsx(styles.pill, filter.unorganized && styles.active)}
+              onClick={toggleUnorganized}
+              title="Filter assets not assigned to any collection (unorganized)"
+            >
+              <IconInbox size={12} />
+              <span>Unorganized</span>
+            </button>
             {KIND_OPTIONS.map(({ label, value }) => (
               <button
                 key={value}

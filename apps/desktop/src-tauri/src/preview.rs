@@ -33,8 +33,10 @@ pub fn start_preview_worker(state: Arc<AppState>) {
             PathBuf::from(custom)
         } else {
             let candidates = [
+                current_dir.join("packages").join("preview-engine").join("venv").join("Scripts").join("pythonw.exe"),
                 current_dir.join("packages").join("preview-engine").join("venv").join("Scripts").join("python.exe"),
                 current_dir.join("packages").join("preview-engine").join("venv").join("bin").join("python"),
+                PathBuf::from("pythonw"),
                 PathBuf::from("python"),
             ];
             candidates.into_iter().find(|p| p.exists()).unwrap_or_else(|| PathBuf::from("python"))
