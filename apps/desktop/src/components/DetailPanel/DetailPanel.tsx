@@ -1,8 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useMemo } from 'react';
 import clsx from 'clsx';
 import { useUIStore, useAssetStore, useTagStore, useCollectionStore } from '../../store';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import type { Asset, ColorLabel } from '../../types';
+import type { Asset, ColorLabel, Collection } from '../../types';
 import { IconStar, IconX, IconExternal, IconEye, IconInfo, IconCopy, IconCheck, IconRefresh } from '../Icons';
 import { api } from '../../api';
 import { ThreeViewer } from './ThreeViewer';
@@ -164,8 +164,14 @@ export function DetailPanel() {
           <CollectionsTab
             asset={asset}
             collections={collections}
-            onAdd={(colId) => addToCollection(colId, [asset.id])}
-            onRemove={(colId) => removeFromCollection(colId, [asset.id])}
+            onAdd={async (colId) => {
+              await addToCollection(colId, [asset.id]);
+              useCollectionStore.getState().fetchCollections();
+            }}
+            onRemove={async (colId) => {
+              await removeFromCollection(colId, [asset.id]);
+              useCollectionStore.getState().fetchCollections();
+            }}
           />
         )}
         {tab === 'preview' && (
@@ -352,15 +358,20 @@ function CollectionsTab({
   asset, collections, onAdd, onRemove,
 }: {
   asset: Asset;
-  collections: import('../../types').Collection[];
+  collections: Collection[];
   onAdd: (collectionId: string) => void;
   onRemove: (collectionId: string) => void;
 }) {
-  const getCollectionPath = (col: import('../../types').Collection): string => {
+  const regularCollections = useMemo(
+    () => collections.filter((c: Collection) => !c.isSmart),
+    [collections]
+  );
+
+  const getCollectionPath = (col: Collection): string => {
     const parts = [col.name];
     let curr = col;
     while (curr.parentId) {
-      const parent = collections.find((c) => c.id === curr.parentId);
+      const parent = regularCollections.find((c: Collection) => c.id === curr.parentId);
       if (!parent) break;
       parts.unshift(parent.name);
       curr = parent;
@@ -370,11 +381,11 @@ function CollectionsTab({
 
   return (
     <div className={styles.tagsGrid}>
-      {collections.length === 0 && (
+      {regularCollections.length === 0 && (
         <p className={styles.noTags}>No collections yet. Create collections in the sidebar.</p>
       )}
-      {collections.map((col) => {
-        const isMember = col.assetIds.includes(asset.id);
+      {regularCollections.map((col: Collection) => {
+        const isMember = (col.assetIds && col.assetIds.includes(asset.id)) || (asset.collections?.includes(col.id) ?? false);
         const pathName = getCollectionPath(col);
         return (
           <button

@@ -30,7 +30,8 @@ export function Sidebar() {
   const deleteTag = useTagStore((s) => s.deleteTag);
 
   const { activeLibraryId, activeCollectionId, setActiveLibrary, setActiveCollection } = useUIStore();
-  const setFilter = useAssetStore((s) => s.setFilter);
+  const replaceFilter = useAssetStore((s) => s.replaceFilter);
+  const resetFilter = useAssetStore((s) => s.resetFilter);
   const clearFilter = useAssetStore((s) => s.clearFilter);
   const setQuery = useAssetStore((s) => s.setQuery);
   const currentFilter = useAssetStore((s) => s.query.filter);
@@ -157,6 +158,8 @@ export function Sidebar() {
 
   const handleLibraryClick = (id: string) => {
     setActiveSmartFilterId(null);
+    setActiveCollection(null);
+    resetFilter();
     if (activeLibraryId === id) {
       setActiveLibrary(null);
       setQuery({ libraryId: undefined });
@@ -169,6 +172,7 @@ export function Sidebar() {
 
   const handleCollectionClick = (id: string) => {
     setActiveSmartFilterId(null);
+    resetFilter();
     if (activeCollectionId === id) {
       setActiveCollection(null);
       setQuery({ collectionId: undefined });
@@ -180,39 +184,16 @@ export function Sidebar() {
   };
 
   const handleSmartFilterClick = (col: (typeof collections)[0]) => {
+    setActiveCollection(null);
     if (activeSmartFilterId === col.id) {
       setActiveSmartFilterId(null);
-      setFilter({
-        kinds: undefined,
-        tags: undefined,
-        rating: undefined,
-        colorLabels: undefined,
-        extensions: undefined,
-        unorganized: undefined,
-        directory: undefined,
-        namePrefix: undefined,
-        nameSuffix: undefined,
-        collectionId: undefined,
-      });
+      resetFilter();
       search();
     } else {
       setActiveSmartFilterId(col.id);
-      setActiveCollection(null);
       try {
         const spec: FilterSpec = col.filterSpec ? JSON.parse(col.filterSpec) : {};
-        setFilter({
-          kinds: undefined,
-          tags: undefined,
-          rating: undefined,
-          colorLabels: undefined,
-          extensions: undefined,
-          unorganized: undefined,
-          directory: undefined,
-          namePrefix: undefined,
-          nameSuffix: undefined,
-          collectionId: undefined,
-          ...spec,
-        });
+        replaceFilter(spec);
         search();
       } catch (err) {
         console.error('Failed to parse smart filter spec:', err);
@@ -222,11 +203,11 @@ export function Sidebar() {
 
   const handleTagFilter = (tagId: string) => {
     setActiveSmartFilterId(null);
+    setActiveCollection(null);
     if (activeTagId === tagId) {
-      // clicking the active tag clears it
-      clearFilter('tags');
+      resetFilter();
     } else {
-      setFilter({ tags: [tagId] });
+      replaceFilter({ tags: [tagId] });
     }
     search();
   };
@@ -280,14 +261,28 @@ export function Sidebar() {
 
   const handleDropOnCollection = async (e: React.DragEvent, colId: string) => {
     e.preventDefault();
-    const filePath = e.dataTransfer.getData('text/plain');
-    const asset = useAssetStore.getState().assets.find((a) => a.filePath === filePath);
-    if (asset) {
-      try {
-        await addToCollection(colId, [asset.id]);
-      } catch (err) {
-        console.error('Failed to add asset to collection:', err);
+    const rawData = e.dataTransfer.getData('application/opendam-asset-id') || e.dataTransfer.getData('text/plain');
+    if (!rawData) return;
+
+    let assetId = rawData;
+    if (rawData.includes('/') || rawData.includes('\\')) {
+      const norm = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+      const match = useAssetStore.getState().assets.find((a) => norm(a.filePath) === norm(rawData));
+      if (match) {
+        assetId = match.id;
       }
+    }
+
+    try {
+      await addToCollection(colId, [assetId]);
+      await useCollectionStore.getState().fetchCollections();
+      const curAsset = useAssetStore.getState().assetMap.get(assetId);
+      if (curAsset) {
+        const updatedCols = Array.from(new Set([...(curAsset.collections || []), colId]));
+        useAssetStore.getState().patchAsset(assetId, { collections: updatedCols });
+      }
+    } catch (err) {
+      console.error('Failed to add asset to collection:', err);
     }
   };
 
@@ -704,7 +699,14 @@ export function Sidebar() {
               className={clsx(styles.item, isActive && styles.active)}
               onClick={() => {
                 setActiveSmartFilterId(null);
-                setFilter(filter);
+                setActiveCollection(null);
+                if (isAll) {
+                  resetFilter();
+                } else if (isUnorganized) {
+                  replaceFilter({ unorganized: true });
+                } else {
+                  replaceFilter(filter as FilterSpec);
+                }
                 search();
               }}
             >

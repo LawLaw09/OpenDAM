@@ -1,11 +1,11 @@
 -- OpenDAM Per-Library SQLite Schema (stored in <library_root>/.opendam/library.sqlite)
 
-PRAGMA journal_mode=TRUNCATE;
+PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
 PRAGMA temp_store=MEMORY;
 PRAGMA cache_size=-64000;
 PRAGMA busy_timeout=10000;
-PRAGMA foreign_keys=ON;
+PRAGMA foreign_keys=OFF;
 
 -- ── Directory modification timestamps for smart incremental scans ────────
 CREATE TABLE IF NOT EXISTS dir_mtimes (

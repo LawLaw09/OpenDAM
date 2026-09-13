@@ -58,10 +58,11 @@ export const AssetCard = memo(function AssetCard({
 
   const handleDragStart = useCallback(
     (e: React.DragEvent) => {
-      e.dataTransfer.setData('text/plain', asset.filePath);
+      e.dataTransfer.setData('application/opendam-asset-id', asset.id);
+      e.dataTransfer.setData('text/plain', asset.id);
       e.dataTransfer.effectAllowed = 'copy';
     },
-    [asset.filePath]
+    [asset.id]
   );
 
   const tagMap = useTagStore((s) => s.tagMap);

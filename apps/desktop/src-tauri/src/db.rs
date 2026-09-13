@@ -25,7 +25,7 @@ pub async fn connect_library_sqlite(db_path: &Path) -> Result<Pool<Sqlite>> {
     let options = SqliteConnectOptions::new()
         .filename(db_path)
         .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Delete)
+        .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(std::time::Duration::from_secs(10));
 
@@ -40,7 +40,7 @@ pub async fn connect_library_sqlite(db_path: &Path) -> Result<Pool<Sqlite>> {
         r#"
         PRAGMA temp_store = MEMORY;
         PRAGMA cache_size = -64000;
-        PRAGMA foreign_keys = ON;
+        PRAGMA foreign_keys = OFF;
         "#
     )
     .execute(&pool)

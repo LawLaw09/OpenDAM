@@ -42,12 +42,12 @@ export function SmartFilterModal({ isOpen, onClose, onCreated }: SmartFilterModa
   // Tag filter state: 'any' | 'none' (untagged) | 'specific'
   const [tagMode, setTagMode] = useState<'any' | 'none' | 'specific'>('any');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [tagLogic, setTagLogic] = useState<'or' | 'and'>('or');
+  const [tagLogic, setTagLogic] = useState<'or' | 'and' | 'and_or'>('or');
 
   // Collection filter state: 'any' | 'none' (unorganized) | 'specific'
   const [collectionMode, setCollectionMode] = useState<'any' | 'none' | 'specific'>('any');
   const [selectedCollections, setSelectedCollections] = useState<string[]>([]);
-  const [collectionLogic, setCollectionLogic] = useState<'or' | 'and'>('or');
+  const [collectionLogic, setCollectionLogic] = useState<'or' | 'and' | 'and_or'>('or');
   const [includeSubcollections, setIncludeSubcollections] = useState<boolean>(true);
 
   const [isSaving, setIsSaving] = useState(false);
@@ -446,6 +446,14 @@ export function SmartFilterModal({ isOpen, onClose, onCreated }: SmartFilterModa
                       >
                         ALL (AND)
                       </button>
+                      <button
+                        type="button"
+                        className={`${styles.logicBtn} ${tagLogic === 'and_or' ? styles.logicBtnActive : ''}`}
+                        onClick={() => setTagLogic('and_or')}
+                        title="Matches items having the primary tag AND at least one of the other selected tags (Any + All)"
+                      >
+                        AND + OR (ANY + ALL)
+                      </button>
                     </div>
                   </div>
 
@@ -542,6 +550,14 @@ export function SmartFilterModal({ isOpen, onClose, onCreated }: SmartFilterModa
                         title="Matches items belonging to ALL selected collections"
                       >
                         ALL (AND)
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.logicBtn} ${collectionLogic === 'and_or' ? styles.logicBtnActive : ''}`}
+                        onClick={() => setCollectionLogic('and_or')}
+                        title="Matches items in parent/main collection AND in any selected sub-collection (Any + All)"
+                      >
+                        AND + OR (ANY + ALL)
                       </button>
                     </div>
                   </div>

@@ -100,8 +100,8 @@ pub async fn add_to_collection(
 ) -> Result<()> {
     let libs = state.db.get_all_libraries().await;
 
-    // Fetch collection info from master_pool or active pool
-    let col_info = sqlx::query_as::<_, (String, String, String, Option<String>, bool, Option<String>, i64)>(
+    // Fetch collection info from master_pool or any lib pool
+    let mut col_info = sqlx::query_as::<_, (String, String, String, Option<String>, bool, Option<String>, i64)>(
         "SELECT id, name, description, parent_id, is_smart, filter_spec, created_at FROM collections WHERE id = ?"
     )
     .bind(&collection_id)
@@ -109,8 +109,42 @@ pub async fn add_to_collection(
     .await
     .unwrap_or(None);
 
+    if col_info.is_none() {
+        for lib in &libs {
+            col_info = sqlx::query_as::<_, (String, String, String, Option<String>, bool, Option<String>, i64)>(
+                "SELECT id, name, description, parent_id, is_smart, filter_spec, created_at FROM collections WHERE id = ?"
+            )
+            .bind(&collection_id)
+            .fetch_optional(&lib.pool)
+            .await
+            .unwrap_or(None);
+            if col_info.is_some() {
+                break;
+            }
+        }
+    }
+
+    // Ensure collection exists in master_pool and all open library pools
+    if let Some((ref cid, ref cname, ref cdesc, ref cpid, csmart, ref cfspec, ctime)) = col_info {
+        let _ = sqlx::query(
+            "INSERT OR IGNORE INTO collections (id, name, description, parent_id, is_smart, filter_spec, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(cid).bind(cname).bind(cdesc).bind(cpid).bind(csmart).bind(cfspec).bind(ctime)
+        .execute(&state.db.master_pool).await;
+
+        for lib in &libs {
+            let _ = sqlx::query(
+                "INSERT OR IGNORE INTO collections (id, name, description, parent_id, is_smart, filter_spec, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            )
+            .bind(cid).bind(cname).bind(cdesc).bind(cpid).bind(csmart).bind(cfspec).bind(ctime)
+            .execute(&lib.pool).await;
+        }
+    }
+
+    let active_pool = state.db.get_active_pool().await;
+
     for aid in &asset_ids {
-        let mut target_pool: Option<sqlx::Pool<sqlx::Sqlite>> = None;
+        let mut found_in_lib = false;
         for lib in &libs {
             let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM assets WHERE id = ?")
                 .bind(aid)
@@ -118,27 +152,30 @@ pub async fn add_to_collection(
                 .await
                 .unwrap_or(None);
             if exists.is_some() {
-                target_pool = Some(lib.pool.clone());
-                break;
+                found_in_lib = true;
+                let _ = sqlx::query("INSERT OR IGNORE INTO collection_assets (collection_id, asset_id) VALUES (?, ?)")
+                    .bind(&collection_id)
+                    .bind(aid)
+                    .execute(&lib.pool)
+                    .await;
             }
         }
 
-        let pool = target_pool.unwrap_or_else(|| state.db.pool.clone());
-
-        // Ensure collection exists in target pool before creating foreign key link
-        if let Some((ref cid, ref cname, ref cdesc, ref cpid, csmart, ref cfspec, ctime)) = col_info {
-            let _ = sqlx::query(
-                "INSERT OR IGNORE INTO collections (id, name, description, parent_id, is_smart, filter_spec, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-            )
-            .bind(cid).bind(cname).bind(cdesc).bind(cpid).bind(csmart).bind(cfspec).bind(ctime)
-            .execute(&pool).await;
-        }
-
+        // Always record in master_pool
         let _ = sqlx::query("INSERT OR IGNORE INTO collection_assets (collection_id, asset_id) VALUES (?, ?)")
             .bind(&collection_id)
             .bind(aid)
-            .execute(&pool)
+            .execute(&state.db.master_pool)
             .await;
+
+        // If not found in any library pool, record in active pool
+        if !found_in_lib {
+            let _ = sqlx::query("INSERT OR IGNORE INTO collection_assets (collection_id, asset_id) VALUES (?, ?)")
+                .bind(&collection_id)
+                .bind(aid)
+                .execute(&active_pool)
+                .await;
+        }
     }
 
     Ok(())
@@ -151,20 +188,25 @@ pub async fn remove_from_collection(
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
     let libs = state.db.get_all_libraries().await;
-    for lib in libs {
-        for aid in &asset_ids {
+    let active_pool = state.db.get_active_pool().await;
+
+    for aid in &asset_ids {
+        for lib in &libs {
             let _ = sqlx::query("DELETE FROM collection_assets WHERE collection_id = ? AND asset_id = ?")
                 .bind(&collection_id)
                 .bind(aid)
                 .execute(&lib.pool)
                 .await;
         }
-    }
-    for aid in &asset_ids {
         let _ = sqlx::query("DELETE FROM collection_assets WHERE collection_id = ? AND asset_id = ?")
             .bind(&collection_id)
             .bind(aid)
             .execute(&state.db.master_pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM collection_assets WHERE collection_id = ? AND asset_id = ?")
+            .bind(&collection_id)
+            .bind(aid)
+            .execute(&active_pool)
             .await;
     }
     Ok(())

@@ -133,6 +133,8 @@ interface AssetStore {
 
   setQuery: (q: Partial<SearchQuery>) => void;
   setFilter: (f: Partial<FilterSpec>) => void;
+  replaceFilter: (f: FilterSpec, collectionId?: string) => void;
+  resetFilter: () => void;
   clearFilter: (key: keyof FilterSpec) => void;
   setSort: (field: SortField, order?: SortOrder) => void;
   setPage: (page: number) => void;
@@ -164,6 +166,18 @@ export const useAssetStore = create<AssetStore>()((set, get) => ({
   setFilter: (f) =>
     set((s) => ({
       query: { ...s.query, filter: { ...s.query.filter, ...f } },
+      page: 0,
+    })),
+
+  replaceFilter: (f, collectionId) =>
+    set((s) => ({
+      query: { ...s.query, collectionId, filter: f },
+      page: 0,
+    })),
+
+  resetFilter: () =>
+    set((s) => ({
+      query: { ...s.query, collectionId: undefined, filter: {} },
       page: 0,
     })),
 

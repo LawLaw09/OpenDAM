@@ -100,7 +100,7 @@ pub async fn search_assets(
         }
     }
 
-    // Tag filter: supports logic "and" (has all tags), "or" (has any tag), "none" (untagged)
+    // Tag filter: supports logic "and" (has all tags), "or" (has any tag), "and_or" (has primary tag AND any of remaining), "none" (untagged)
     let tag_logic = f.tag_logic.as_deref().unwrap_or("or");
     if tag_logic == "none" {
         conditions.push("a.id NOT IN (SELECT asset_id FROM asset_tags)".into());
@@ -114,6 +114,21 @@ pub async fn search_assets(
                 ));
                 binds.extend(tags.clone());
                 binds.push(tags.len().to_string());
+            } else if tag_logic == "and_or" {
+                if tags.len() <= 1 {
+                    conditions.push("a.id IN (SELECT asset_id FROM asset_tags WHERE tag_id = ?)".into());
+                    binds.push(tags[0].clone());
+                } else {
+                    let primary_tag = &tags[0];
+                    let remaining_tags = &tags[1..];
+                    let placeholders = remaining_tags.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                    conditions.push(format!(
+                        "a.id IN (SELECT asset_id FROM asset_tags WHERE tag_id = ?) AND a.id IN (SELECT asset_id FROM asset_tags WHERE tag_id IN ({}))",
+                        placeholders
+                    ));
+                    binds.push(primary_tag.clone());
+                    binds.extend(remaining_tags.iter().cloned());
+                }
             } else {
                 let placeholders = tags.iter().map(|_| "?").collect::<Vec<_>>().join(",");
                 conditions.push(format!(
@@ -125,7 +140,7 @@ pub async fn search_assets(
         }
     }
 
-    // Collection filter: supports multi-collection, subcollections, logic "and" (in all), "or" (in any), "none" (unorganized)
+    // Collection filter: supports multi-collection, subcollections, logic "and" (in all), "or" (in any), "and_or" (primary AND any remaining), "none" (unorganized)
     let mut target_collections: Vec<String> = Vec::new();
     if let Some(col_id) = payload.query.collection_id.as_ref().or(f.collection_id.as_ref()) {
         if !col_id.is_empty() && !target_collections.contains(col_id) {
@@ -165,6 +180,69 @@ pub async fn search_assets(
                     );
                 }
                 binds.push(cid.clone());
+            }
+        } else if col_logic == "and_or" {
+            if target_collections.len() <= 1 {
+                let cid = &target_collections[0];
+                if include_sub {
+                    conditions.push(
+                        "a.id IN (
+                            WITH RECURSIVE col_tree AS (
+                                SELECT id FROM collections WHERE id = ?
+                                UNION ALL
+                                SELECT c.id FROM collections c JOIN col_tree ct ON c.parent_id = ct.id
+                            )
+                            SELECT asset_id FROM collection_assets WHERE collection_id IN (SELECT id FROM col_tree)
+                        )".into()
+                    );
+                } else {
+                    conditions.push(
+                        "a.id IN (SELECT asset_id FROM collection_assets WHERE collection_id = ?)".into()
+                    );
+                }
+                binds.push(cid.clone());
+            } else {
+                let primary_col = &target_collections[0];
+                let remaining_cols = &target_collections[1..];
+                if include_sub {
+                    conditions.push(
+                        "a.id IN (
+                            WITH RECURSIVE col_tree AS (
+                                SELECT id FROM collections WHERE id = ?
+                                UNION ALL
+                                SELECT c.id FROM collections c JOIN col_tree ct ON c.parent_id = ct.id
+                            )
+                            SELECT asset_id FROM collection_assets WHERE collection_id IN (SELECT id FROM col_tree)
+                        )".into()
+                    );
+                    binds.push(primary_col.clone());
+
+                    let rem_placeholders = remaining_cols.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                    conditions.push(format!(
+                        "a.id IN (
+                            WITH RECURSIVE col_tree AS (
+                                SELECT id FROM collections WHERE id IN ({})
+                                UNION ALL
+                                SELECT c.id FROM collections c JOIN col_tree ct ON c.parent_id = ct.id
+                            )
+                            SELECT asset_id FROM collection_assets WHERE collection_id IN (SELECT id FROM col_tree)
+                        )",
+                        rem_placeholders
+                    ));
+                    binds.extend(remaining_cols.iter().cloned());
+                } else {
+                    conditions.push(
+                        "a.id IN (SELECT asset_id FROM collection_assets WHERE collection_id = ?)".into()
+                    );
+                    binds.push(primary_col.clone());
+
+                    let rem_placeholders = remaining_cols.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                    conditions.push(format!(
+                        "a.id IN (SELECT asset_id FROM collection_assets WHERE collection_id IN ({}))",
+                        rem_placeholders
+                    ));
+                    binds.extend(remaining_cols.iter().cloned());
+                }
             }
         } else {
             if include_sub {
@@ -361,10 +439,9 @@ pub async fn update_asset(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Asset> {
     let libs = state.db.get_all_libraries().await;
-    let mut target_pool = state.db.get_active_pool().await;
-    let mut target_root = state.db.get_library_root(None).await;
+    let mut pools_to_update: Vec<(sqlx::Pool<sqlx::Sqlite>, Option<std::path::PathBuf>)> = Vec::new();
 
-    for lib in libs {
+    for lib in &libs {
         let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM assets WHERE id = ?")
             .bind(&id)
             .fetch_optional(&lib.pool)
@@ -372,60 +449,71 @@ pub async fn update_asset(
             .unwrap_or(None);
 
         if exists.is_some() {
-            target_pool = lib.pool.clone();
-            target_root = Some(lib.root_path.clone());
-            break;
+            pools_to_update.push((lib.pool.clone(), Some(lib.root_path.clone())));
         }
     }
 
-    let pool = &target_pool;
+    let master_exists: Option<(String,)> = sqlx::query_as("SELECT id FROM assets WHERE id = ?")
+        .bind(&id)
+        .fetch_optional(&state.db.master_pool)
+        .await
+        .unwrap_or(None);
 
-    if let Some(rating) = patch.rating {
-        sqlx::query("UPDATE assets SET rating = ? WHERE id = ?")
-            .bind(rating).bind(&id).execute(pool).await.map_err(|e| e.to_string())?;
+    if master_exists.is_some() || pools_to_update.is_empty() {
+        pools_to_update.push((state.db.master_pool.clone(), state.db.get_library_root(None).await));
     }
-    if let Some(color_label) = patch.color_label {
-        sqlx::query("UPDATE assets SET color_label = ? WHERE id = ?")
-            .bind(color_label).bind(&id).execute(pool).await.map_err(|e| e.to_string())?;
-    }
-    if let Some(description) = patch.description {
-        sqlx::query("UPDATE assets SET description = ? WHERE id = ?")
-            .bind(description).bind(&id).execute(pool).await.map_err(|e| e.to_string())?;
-    }
-    if let Some(thumbnail_path) = patch.thumbnail_path {
-        let rel_thumb = match &target_root {
-            Some(r) => make_relative_path(r, Path::new(&thumbnail_path)),
-            None => thumbnail_path,
-        };
-        sqlx::query("UPDATE assets SET thumbnail_path = ? WHERE id = ?")
-            .bind(rel_thumb).bind(&id).execute(pool).await.map_err(|e| e.to_string())?;
-    }
-    if let Some(preview_status) = patch.preview_status {
-        sqlx::query("UPDATE assets SET preview_status = ? WHERE id = ?")
-            .bind(preview_status).bind(&id).execute(pool).await.map_err(|e| e.to_string())?;
-    }
-    if let Some(tags) = patch.tags {
-        sqlx::query("DELETE FROM asset_tags WHERE asset_id = ?")
-            .bind(&id).execute(pool).await.map_err(|e| e.to_string())?;
-        for tag_id in &tags {
-            let tag_def = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
-                "SELECT id, name, color, parent_id FROM tags WHERE id = ?"
-            )
-            .bind(tag_id)
-            .fetch_optional(&state.db.master_pool).await.unwrap_or(None);
 
-            if let Some((tid, tname, tcolor, tparent)) = tag_def {
-                let _ = sqlx::query("INSERT OR IGNORE INTO tags (id, name, color, parent_id) VALUES (?, ?, ?, ?)")
-                    .bind(&tid).bind(&tname).bind(&tcolor).bind(&tparent)
-                    .execute(pool).await;
-            } else {
-                let _ = sqlx::query("INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)")
-                    .bind(tag_id).bind(tag_id)
-                    .execute(pool).await;
+    let active_pool = state.db.get_active_pool().await;
+    pools_to_update.push((active_pool, state.db.get_library_root(None).await));
+
+    for (pool, root) in &pools_to_update {
+        if let Some(rating) = patch.rating {
+            let _ = sqlx::query("UPDATE assets SET rating = ? WHERE id = ?")
+                .bind(rating).bind(&id).execute(pool).await;
+        }
+        if let Some(ref color_label) = patch.color_label {
+            let _ = sqlx::query("UPDATE assets SET color_label = ? WHERE id = ?")
+                .bind(color_label).bind(&id).execute(pool).await;
+        }
+        if let Some(ref description) = patch.description {
+            let _ = sqlx::query("UPDATE assets SET description = ? WHERE id = ?")
+                .bind(description).bind(&id).execute(pool).await;
+        }
+        if let Some(ref thumbnail_path) = patch.thumbnail_path {
+            let rel_thumb = match root {
+                Some(r) => make_relative_path(r, Path::new(thumbnail_path)),
+                None => thumbnail_path.clone(),
+            };
+            let _ = sqlx::query("UPDATE assets SET thumbnail_path = ? WHERE id = ?")
+                .bind(rel_thumb).bind(&id).execute(pool).await;
+        }
+        if let Some(ref preview_status) = patch.preview_status {
+            let _ = sqlx::query("UPDATE assets SET preview_status = ? WHERE id = ?")
+                .bind(preview_status).bind(&id).execute(pool).await;
+        }
+        if let Some(ref tags) = patch.tags {
+            let _ = sqlx::query("DELETE FROM asset_tags WHERE asset_id = ?")
+                .bind(&id).execute(pool).await;
+            for tag_id in tags {
+                let tag_def = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
+                    "SELECT id, name, color, parent_id FROM tags WHERE id = ?"
+                )
+                .bind(tag_id)
+                .fetch_optional(&state.db.master_pool).await.unwrap_or(None);
+
+                if let Some((tid, tname, tcolor, tparent)) = tag_def {
+                    let _ = sqlx::query("INSERT OR IGNORE INTO tags (id, name, color, parent_id) VALUES (?, ?, ?, ?)")
+                        .bind(&tid).bind(&tname).bind(&tcolor).bind(&tparent)
+                        .execute(pool).await;
+                } else {
+                    let _ = sqlx::query("INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)")
+                        .bind(tag_id).bind(tag_id)
+                        .execute(pool).await;
+                }
+
+                let _ = sqlx::query("INSERT OR IGNORE INTO asset_tags (asset_id, tag_id) VALUES (?, ?)")
+                    .bind(&id).bind(tag_id).execute(pool).await;
             }
-
-            sqlx::query("INSERT OR IGNORE INTO asset_tags (asset_id, tag_id) VALUES (?, ?)")
-                .bind(&id).bind(tag_id).execute(pool).await.map_err(|e| format!("Failed to assign tag: {}", e))?;
         }
     }
 
