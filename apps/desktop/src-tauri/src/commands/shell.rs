@@ -4,10 +4,27 @@ type Result<T> = std::result::Result<T, String>;
 pub async fn reveal_in_explorer(file_path: String) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer")
-            .args(["/select,", &file_path])
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        use std::os::windows::process::CommandExt;
+        let norm_path = file_path.replace('/', "\\");
+        let path = std::path::Path::new(&norm_path);
+
+        if path.exists() {
+            std::process::Command::new("explorer")
+                .raw_arg(format!(r#"/select,"{}""#, norm_path))
+                .spawn()
+                .map_err(|e| format!("Failed to launch explorer: {}", e))?;
+        } else if let Some(parent) = path.parent() {
+            let parent_str = parent.to_string_lossy().replace('/', "\\");
+            std::process::Command::new("explorer")
+                .raw_arg(format!(r#""{}""#, parent_str))
+                .spawn()
+                .map_err(|e| format!("Failed to launch explorer: {}", e))?;
+        } else {
+            std::process::Command::new("explorer")
+                .raw_arg(format!(r#""{}""#, norm_path))
+                .spawn()
+                .map_err(|e| format!("Failed to launch explorer: {}", e))?;
+        }
     }
     #[cfg(target_os = "macos")]
     {
@@ -35,11 +52,12 @@ pub async fn open_with_default(file_path: String) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
+        let norm_path = file_path.replace('/', "\\");
         std::process::Command::new("cmd")
-            .args(["/C", "start", "", &file_path])
+            .args(["/C", "start", "", &norm_path])
             .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .spawn()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("Failed to open file: {}", e))?;
     }
     #[cfg(target_os = "macos")]
     {

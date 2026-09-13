@@ -129,7 +129,13 @@ export function DetailPanel() {
             id="detail-open-external"
             className={styles.actionBtn}
             title="Open with default app"
-            onClick={() => api.openWithDefault(asset.filePath)}
+            onClick={async () => {
+              try {
+                await api.openWithDefault(asset.filePath);
+              } catch (err) {
+                console.error('Failed to open with default app:', err);
+              }
+            }}
           >
             <IconExternal size={14} />
           </button>
@@ -137,7 +143,13 @@ export function DetailPanel() {
             id="detail-reveal"
             className={styles.actionBtn}
             title="Reveal in Explorer"
-            onClick={() => api.revealInExplorer(asset.filePath)}
+            onClick={async () => {
+              try {
+                await api.revealInExplorer(asset.filePath);
+              } catch (err) {
+                console.error('Failed to reveal in explorer:', err);
+              }
+            }}
           >
             <IconEye size={14} />
           </button>
@@ -254,7 +266,18 @@ function InfoTab({
 
       {/* File info */}
       <label className={styles.infoLabel}>Path</label>
-      <span className={clsx(styles.infoValue, styles.mono, 'truncate')} title={asset.filePath}>
+      <span
+        className={clsx(styles.infoValue, styles.mono, 'truncate')}
+        title={`${asset.filePath} (Click to reveal in Explorer)`}
+        style={{ cursor: 'pointer' }}
+        onClick={async () => {
+          try {
+            await api.revealInExplorer(asset.filePath);
+          } catch (err) {
+            console.error('Failed to reveal in explorer:', err);
+          }
+        }}
+      >
         {asset.filePath}
       </span>
 
