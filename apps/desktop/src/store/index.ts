@@ -31,6 +31,10 @@ interface UIState {
   selectAll: (ids: string[]) => void;
   clearSelection: () => void;
   focusAsset: (id: string | null) => void;
+  selectedLibraryIds: string[];
+  setSelectedLibraryIds: (ids: string[]) => void;
+  toggleSelectedLibrary: (id: string, multi?: boolean) => void;
+  clearLibrarySelection: () => void;
   setActiveLibrary: (id: string | null) => void;
   setActiveCollection: (id: string | null) => void;
 }
@@ -45,6 +49,7 @@ export const useUIStore = create<UIState>()(
       selectedAssetIds: new Set(),
       focusedAssetId: null,
       activeLibraryId: null,
+      selectedLibraryIds: [],
       activeCollectionId: null,
 
       setViewMode: (viewMode) => set({ viewMode }),
@@ -70,10 +75,34 @@ export const useUIStore = create<UIState>()(
         set({ selectedAssetIds: new Set(), focusedAssetId: null }),
 
       focusAsset: (id) => set({ focusedAssetId: id }),
+
+      setSelectedLibraryIds: (ids) =>
+        set({ selectedLibraryIds: ids, activeLibraryId: ids[0] ?? null, activeCollectionId: null }),
+
+      toggleSelectedLibrary: (id, multi = false) =>
+        set((s) => {
+          let next: string[];
+          if (multi) {
+            next = s.selectedLibraryIds.includes(id)
+              ? s.selectedLibraryIds.filter((i) => i !== id)
+              : [...s.selectedLibraryIds, id];
+          } else {
+            next = s.selectedLibraryIds.length === 1 && s.selectedLibraryIds[0] === id ? [] : [id];
+          }
+          return {
+            selectedLibraryIds: next,
+            activeLibraryId: next.length === 1 ? next[0] : null,
+            activeCollectionId: null,
+          };
+        }),
+
+      clearLibrarySelection: () =>
+        set({ selectedLibraryIds: [], activeLibraryId: null }),
+
       setActiveLibrary: (id) =>
-        set({ activeLibraryId: id, activeCollectionId: null }),
+        set({ activeLibraryId: id, selectedLibraryIds: id ? [id] : [], activeCollectionId: null }),
       setActiveCollection: (id) =>
-        set({ activeCollectionId: id, activeLibraryId: null }),
+        set({ activeCollectionId: id, activeLibraryId: null, selectedLibraryIds: [] }),
     }),
     {
       name: 'opendam-ui',

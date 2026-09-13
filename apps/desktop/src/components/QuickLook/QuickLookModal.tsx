@@ -1,4 +1,5 @@
-import { memo } from 'react';
+import { memo, useRef, useState, useEffect } from 'react';
+import clsx from 'clsx';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { Asset } from '../../types';
 import { ThreeViewer } from '../DetailPanel/ThreeViewer';
@@ -10,6 +11,100 @@ interface QuickLookModalProps {
   isOpen: boolean;
 }
 
+const VIDEO_STEPS = [
+  { label: '0%', factor: 0.0 },
+  { label: '25%', factor: 0.25 },
+  { label: '50%', factor: 0.50 },
+  { label: '75%', factor: 0.75 },
+  { label: '100%', factor: 1.0 },
+];
+
+function VideoQuickLook({ filePath }: { filePath: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [activeStep, setActiveStep] = useState<number>(0);
+  const [duration, setDuration] = useState<number>(0);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+
+  const handleLoadedMetadata = () => {
+    if (videoRef.current) {
+      const dur = videoRef.current.duration;
+      setDuration(dur);
+      videoRef.current.currentTime = 0;
+      videoRef.current.play().catch(() => {});
+    }
+  };
+
+  // Loop through 0%, 25%, 50%, 75%, 100% every 1 second (1000ms)
+  useEffect(() => {
+    if (!duration || duration <= 0) return;
+
+    let stepIdx = 0;
+    const interval = setInterval(() => {
+      stepIdx = (stepIdx + 1) % VIDEO_STEPS.length;
+      setActiveStep(stepIdx);
+      if (videoRef.current) {
+        const factor = VIDEO_STEPS[stepIdx].factor;
+        const seekTarget = factor === 1.0 ? Math.max(0, duration - 1.0) : duration * factor;
+        videoRef.current.currentTime = seekTarget;
+        videoRef.current.play().catch(() => {});
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [duration]);
+
+  const handleTimeUpdate = () => {
+    if (videoRef.current) {
+      setCurrentTime(videoRef.current.currentTime);
+    }
+  };
+
+  const formatTime = (sec: number): string => {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <div className={styles.videoWrapper}>
+      <video
+        ref={videoRef}
+        src={convertFileSrc(filePath)}
+        autoPlay
+        muted
+        playsInline
+        className={styles.largeVideo}
+        onLoadedMetadata={handleLoadedMetadata}
+        onTimeUpdate={handleTimeUpdate}
+      />
+      <div className={styles.videoTimelineOverlay}>
+        <div className={styles.stepPills}>
+          {VIDEO_STEPS.map((st, idx) => (
+            <div
+              key={st.label}
+              className={clsx(styles.stepPill, idx === activeStep && styles.stepPillActive)}
+              onClick={() => {
+                if (videoRef.current && duration > 0) {
+                  setActiveStep(idx);
+                  const target = st.factor === 1.0 ? Math.max(0, duration - 1.0) : duration * st.factor;
+                  videoRef.current.currentTime = target;
+                }
+              }}
+              title={`Jump to ${st.label}`}
+            >
+              <span className={styles.stepDot} />
+              <span>{st.label}</span>
+            </div>
+          ))}
+        </div>
+        <div className={styles.videoTimeBadge}>
+          <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export const QuickLookModal = memo(function QuickLookModal({
   asset,
   isOpen,
@@ -19,6 +114,10 @@ export const QuickLookModal = memo(function QuickLookModal({
   const modelPath =
     (asset.metadata?.preview_model as string) ||
     (asset.thumbnailPath?.endsWith('.glb') ? asset.thumbnailPath : undefined);
+
+  const isVideo =
+    asset.kind === 'video' ||
+    ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(asset.extension.toLowerCase());
 
   const isNativeImg = ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'svg'].includes(
     asset.extension.toLowerCase()
@@ -75,6 +174,8 @@ export const QuickLookModal = memo(function QuickLookModal({
             <div className={styles.threeWrapper}>
               <ThreeViewer modelPath={modelPath} />
             </div>
+          ) : isVideo ? (
+            <VideoQuickLook filePath={asset.filePath} />
           ) : imagePath ? (
             <div className={styles.imgWrapper}>
               <img

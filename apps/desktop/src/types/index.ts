@@ -109,6 +109,7 @@ export interface SearchQuery {
   filter: FilterSpec;
   sort: { field: SortField; order: SortOrder };
   libraryId?: string;
+  libraryIds?: string[];
   collectionId?: string;
   includeSubcollections?: boolean;
 }

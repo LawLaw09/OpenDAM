@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import clsx from 'clsx';
-import { useUIStore, useAssetStore } from '../../store';
+import { open } from '@tauri-apps/plugin-dialog';
+import { useUIStore, useAssetStore, useLibraryStore } from '../../store';
 import { AssetCard } from './AssetCard';
 import { AssetListRow } from './AssetListRow';
 import { FilterBar } from './FilterBar';
@@ -96,6 +97,35 @@ export function AssetGrid() {
 }
 
 function EmptyState() {
+  const libraries = useLibraryStore((s) => s.libraries);
+  const addLibrary = useLibraryStore((s) => s.addLibrary);
+  const resetFilter = useAssetStore((s) => s.resetFilter);
+  const search = useAssetStore((s) => s.search);
+
+  const handleAddLibrary = async () => {
+    try {
+      const selectedPath = await open({
+        directory: true,
+        multiple: false,
+        title: 'Select Library Folder',
+      });
+      if (selectedPath && typeof selectedPath === 'string') {
+        const name = selectedPath.split(/[/\\]/).filter(Boolean).pop() || 'New Library';
+        await addLibrary(name, [selectedPath]);
+        search();
+      }
+    } catch (err) {
+      console.error('Failed to add library:', err);
+    }
+  };
+
+  const handleClearFilters = () => {
+    resetFilter();
+    search();
+  };
+
+  const hasLibraries = libraries.length > 0;
+
   return (
     <div className={styles.empty}>
       <div className={styles.emptyIcon}>
@@ -110,13 +140,34 @@ function EmptyState() {
             strokeLinecap="round"/>
         </svg>
       </div>
-      <h2 className={styles.emptyTitle}>No assets found</h2>
+      <h2 className={styles.emptyTitle}>
+        {hasLibraries ? 'No matching assets found' : 'No libraries yet'}
+      </h2>
       <p className={styles.emptyText}>
-        Add a library folder to start browsing your 3D assets, materials, and textures.
+        {hasLibraries
+          ? 'No assets match your current search or filter criteria.'
+          : 'Add a library folder to start browsing your 3D assets, materials, textures, and videos.'}
       </p>
-      <button className={styles.emptyBtn} id="empty-add-library">
-        + Add Library
-      </button>
+      <div className={styles.emptyActions}>
+        {hasLibraries && (
+          <button
+            type="button"
+            className={styles.emptyBtn}
+            id="empty-clear-filters"
+            onClick={handleClearFilters}
+          >
+            Clear Filters
+          </button>
+        )}
+        <button
+          type="button"
+          className={hasLibraries ? styles.emptyBtnSecondary : styles.emptyBtn}
+          id="empty-add-library"
+          onClick={handleAddLibrary}
+        >
+          + Add Library
+        </button>
+      </div>
     </div>
   );
 }

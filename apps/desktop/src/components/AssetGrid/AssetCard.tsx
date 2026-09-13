@@ -129,6 +129,25 @@ export const AssetCard = memo(function AssetCard({
             loading="lazy"
             onError={() => setImgError(true)}
           />
+        ) : (asset.kind === 'video' && asset.filePath && !imgError) ? (
+          <div className={styles.videoThumbWrapper}>
+            <video
+              src={convertFileSrc(asset.filePath)}
+              preload="metadata"
+              muted
+              playsInline
+              className={styles.thumbVideo}
+              onLoadedMetadata={(e) => {
+                try {
+                  e.currentTarget.currentTime = 0.1;
+                } catch {}
+              }}
+              onError={() => setImgError(true)}
+            />
+            <div className={styles.videoPlayOverlay}>
+              <IconVideo size={13} />
+            </div>
+          </div>
         ) : (
           <div className={styles.thumbPlaceholder}>
             <KindIcon size={36} />

@@ -172,6 +172,8 @@ pub struct SearchQuery {
     pub sort: SortSpec,
     #[serde(rename = "libraryId")]
     pub library_id: Option<String>,
+    #[serde(rename = "libraryIds")]
+    pub library_ids: Option<Vec<String>>,
     #[serde(rename = "collectionId")]
     pub collection_id: Option<String>,
     #[serde(rename = "includeSubcollections")]

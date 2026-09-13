@@ -81,6 +81,19 @@ export function DetailPanel() {
           <img src={convertFileSrc(asset.thumbnailPath)} alt={asset.fileName} className={styles.thumbImg} />
         ) : (['image', 'texture'].includes(asset.kind) && asset.filePath) ? (
           <img src={convertFileSrc(asset.filePath)} alt={asset.fileName} className={styles.thumbImg} />
+        ) : (asset.kind === 'video' && asset.filePath) ? (
+          <video
+            src={convertFileSrc(asset.filePath)}
+            preload="metadata"
+            muted
+            playsInline
+            controls
+            className={styles.thumbImg}
+            style={{ objectFit: 'contain' }}
+            onLoadedMetadata={(e) => {
+              try { e.currentTarget.currentTime = 0.1; } catch {}
+            }}
+          />
         ) : (asset.metadata?.preview_model || asset.thumbnailPath?.endsWith('.glb')) ? (
           <ThreeViewer modelPath={(asset.metadata?.preview_model as string) || asset.thumbnailPath!} />
         ) : (
@@ -432,6 +445,18 @@ function PreviewTab({
             <IconRefresh size={13} className={clsx(isPending && 'animate-spin')} />
             <span>{isPending ? 'Generating…' : 'Regenerate Preview'}</span>
           </button>
+        </div>
+      ) : (asset.kind === 'video' && asset.filePath) ? (
+        <div className={styles.previewViewerWrapper}>
+          <video
+            src={convertFileSrc(asset.filePath)}
+            controls
+            autoPlay
+            muted
+            playsInline
+            className={styles.previewImg}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
+          />
         </div>
       ) : imagePath ? (
         <div className={styles.previewViewerWrapper}>

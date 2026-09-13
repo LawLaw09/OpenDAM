@@ -48,10 +48,37 @@ pub async fn search_assets(
     payload: SearchPayload,
     state: State<'_, Arc<AppState>>,
 ) -> Result<SearchResult> {
-    let handle_opt = state.db.get_library_handle(payload.query.library_id.as_deref()).await;
-    let (pool, root_opt) = match &handle_opt {
-        Some(h) => (h.pool.clone(), Some(h.root_path.clone())),
-        None => (state.db.get_active_pool().await, None),
+    let all_libs = state.db.get_all_libraries().await;
+    let target_libs: Vec<(sqlx::Pool<sqlx::Sqlite>, Option<std::path::PathBuf>)> = {
+        let mut list = Vec::new();
+        if let Some(ref lids) = payload.query.library_ids {
+            if !lids.is_empty() {
+                for lib in &all_libs {
+                    if lids.contains(&lib.id) {
+                        list.push((lib.pool.clone(), Some(lib.root_path.clone())));
+                    }
+                }
+            }
+        } else if let Some(ref lid) = payload.query.library_id {
+            if !lid.is_empty() {
+                for lib in &all_libs {
+                    if &lib.id == lid {
+                        list.push((lib.pool.clone(), Some(lib.root_path.clone())));
+                    }
+                }
+            }
+        }
+
+        if list.is_empty() {
+            if all_libs.is_empty() {
+                list.push((state.db.get_active_pool().await, state.db.get_library_root(None).await));
+            } else {
+                for lib in &all_libs {
+                    list.push((lib.pool.clone(), Some(lib.root_path.clone())));
+                }
+            }
+        }
+        list
     };
 
     let offset = payload.page * payload.page_size;
@@ -326,39 +353,116 @@ pub async fn search_assets(
         where_clause, sort_col, sort_dir
     );
 
-    // Execute count
-    let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
-    for b in &binds {
-        count_query = count_query.bind(b.clone());
+    if target_libs.len() == 1 {
+        let (pool, root_opt) = &target_libs[0];
+
+        let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+        for b in &binds {
+            count_query = count_query.bind(b.clone());
+        }
+        let total = count_query.fetch_one(pool).await.map_err(|e| e.to_string())?;
+
+        let mut data_query = sqlx::query_as::<_, (
+            String, String, String, String, String,
+            i64, i64, i64, i64,
+            String, String, Option<String>,
+            String, String,
+            Option<String>,
+            Option<String>,
+        )>(&data_sql);
+        for b in &binds {
+            data_query = data_query.bind(b.clone());
+        }
+        data_query = data_query.bind(limit).bind(offset);
+
+        let rows = data_query.fetch_all(pool).await.map_err(|e| e.to_string())?;
+        let root_ref = root_opt.as_deref();
+        let assets = rows
+            .into_iter()
+            .map(|(id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols)| {
+                row_to_asset(root_ref, id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols)
+            })
+            .collect();
+
+        return Ok(SearchResult {
+            assets,
+            total,
+            page: payload.page,
+            page_size: payload.page_size,
+        });
     }
-    let total = count_query.fetch_one(&pool).await.map_err(|e| e.to_string())?;
 
-    // Execute data fetch
-    let mut data_query = sqlx::query_as::<_, (
-        String, String, String, String, String,
-        i64, i64, i64, i64,
-        String, String, Option<String>,
-        String, String,
-        Option<String>,
-        Option<String>,
-    )>(&data_sql);
-    for b in &binds {
-        data_query = data_query.bind(b.clone());
+    // Multiple libraries: query each, combine counts, and merge-sort
+    let fetch_limit = offset + limit;
+    let multi_data_sql = format!(
+        r#"SELECT
+            a.id, a.file_path, a.file_name, a.extension, a.kind,
+            a.size_bytes, a.modified_at, a.indexed_at, a.rating,
+            a.color_label, a.description, a.thumbnail_path,
+            a.preview_status, a.metadata,
+            (SELECT json_group_array(tag_id) FROM asset_tags WHERE asset_id = a.id) AS tags,
+            (SELECT json_group_array(collection_id) FROM collection_assets WHERE asset_id = a.id) AS collections
+           FROM assets a
+           {}
+           ORDER BY {} {}
+           LIMIT ?"#,
+        where_clause, sort_col, sort_dir
+    );
+
+    let mut total: i64 = 0;
+    let mut all_assets: Vec<Asset> = Vec::new();
+
+    for (pool, root_opt) in &target_libs {
+        let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+        for b in &binds {
+            count_query = count_query.bind(b.clone());
+        }
+        if let Ok(c) = count_query.fetch_one(pool).await {
+            total += c;
+        }
+
+        let mut data_query = sqlx::query_as::<_, (
+            String, String, String, String, String,
+            i64, i64, i64, i64,
+            String, String, Option<String>,
+            String, String,
+            Option<String>,
+            Option<String>,
+        )>(&multi_data_sql);
+        for b in &binds {
+            data_query = data_query.bind(b.clone());
+        }
+        data_query = data_query.bind(fetch_limit);
+
+        if let Ok(rows) = data_query.fetch_all(pool).await {
+            let root_ref = root_opt.as_deref();
+            for (id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols) in rows {
+                all_assets.push(row_to_asset(root_ref, id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols));
+            }
+        }
     }
-    data_query = data_query.bind(limit).bind(offset);
 
-    let rows = data_query.fetch_all(&pool).await.map_err(|e| e.to_string())?;
+    let sort_field = payload.query.sort.field.as_str();
+    let is_asc = payload.query.sort.order == "asc";
+    all_assets.sort_by(|a, b| {
+        let cmp = match sort_field {
+            "name"   => a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()),
+            "size"   => a.size_bytes.cmp(&b.size_bytes),
+            "rating" => a.rating.cmp(&b.rating),
+            "kind"   => a.kind.cmp(&b.kind),
+            _        => a.modified_at.cmp(&b.modified_at),
+        };
+        if is_asc { cmp } else { cmp.reverse() }
+    });
 
-    let root_ref = root_opt.as_deref();
-    let assets = rows
+    let paged_assets: Vec<Asset> = all_assets
         .into_iter()
-        .map(|(id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols)| {
-            row_to_asset(root_ref, id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols)
-        })
+        .skip(offset as usize)
+        .take(limit as usize)
         .collect();
 
     Ok(SearchResult {
-        assets,
+        assets: paged_assets,
         total,
         page: payload.page,
         page_size: payload.page_size,

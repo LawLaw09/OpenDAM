@@ -29,7 +29,15 @@ export function Sidebar() {
   const createTag = useTagStore((s) => s.createTag);
   const deleteTag = useTagStore((s) => s.deleteTag);
 
-  const { activeLibraryId, activeCollectionId, setActiveLibrary, setActiveCollection } = useUIStore();
+  const {
+    activeLibraryId,
+    selectedLibraryIds,
+    activeCollectionId,
+    setActiveLibrary,
+    setActiveCollection,
+    toggleSelectedLibrary,
+    clearLibrarySelection,
+  } = useUIStore();
   const replaceFilter = useAssetStore((s) => s.replaceFilter);
   const resetFilter = useAssetStore((s) => s.resetFilter);
   const clearFilter = useAssetStore((s) => s.clearFilter);
@@ -156,17 +164,30 @@ export function Sidebar() {
     }
   };
 
-  const handleLibraryClick = (id: string) => {
+  const handleAllLibrariesClick = () => {
     setActiveSmartFilterId(null);
     setActiveCollection(null);
-    resetFilter();
-    if (activeLibraryId === id) {
-      setActiveLibrary(null);
-      setQuery({ libraryId: undefined });
-    } else {
-      setActiveLibrary(id);
-      setQuery({ libraryId: id, collectionId: undefined });
-    }
+    clearLibrarySelection();
+    setQuery({
+      libraryIds: undefined,
+      libraryId: undefined,
+      collectionId: undefined,
+    });
+    search();
+  };
+
+  const handleLibraryClick = (id: string, e?: React.MouseEvent) => {
+    setActiveSmartFilterId(null);
+    setActiveCollection(null);
+    const isCheckbox = (e?.target as HTMLElement)?.tagName?.toLowerCase() === 'input';
+    const isMulti = e ? Boolean(e.metaKey || e.ctrlKey || e.shiftKey || isCheckbox) : false;
+    toggleSelectedLibrary(id, isMulti);
+    const nextSelected = useUIStore.getState().selectedLibraryIds;
+    setQuery({
+      libraryIds: nextSelected.length > 0 ? nextSelected : undefined,
+      libraryId: undefined,
+      collectionId: undefined,
+    });
     search();
   };
 
@@ -430,29 +451,66 @@ export function Sidebar() {
         {libraries.length === 0 && (
           <p className={styles.empty}>No libraries yet</p>
         )}
-        {libraries.map((lib) => (
+        {libraries.length > 1 && (
           <div
-            key={lib.id}
-            id={`lib-${lib.id}`}
-            className={clsx(styles.item, activeLibraryId === lib.id && styles.active)}
-            onClick={() => handleLibraryClick(lib.id)}
+            id="lib-all"
+            className={clsx(styles.item, selectedLibraryIds.length === 0 && styles.active)}
+            onClick={handleAllLibrariesClick}
             role="button"
             tabIndex={0}
+            title="Search across all libraries (none selected)"
           >
             <IconFolder size={13} />
-            <span className={clsx(styles.itemName, 'truncate')}>{lib.name}</span>
-            <span className={styles.badge}>{(lib.assetCount || 0).toLocaleString()}</span>
-            <span
-              className={clsx(styles.itemActionBtn, styles.itemActionBtnDanger)}
-              onClick={(e) => handleRemoveLibrary(e, lib.id, lib.name)}
-              title="Remove library"
-              role="button"
-              tabIndex={0}
-            >
-              <IconTrash size={11} />
+            <span className={clsx(styles.itemName, 'truncate')} style={{ fontWeight: selectedLibraryIds.length === 0 ? 600 : 400 }}>
+              All Libraries
+            </span>
+            <span className={styles.badge}>
+              {libraries.reduce((sum, l) => sum + (l.assetCount || 0), 0).toLocaleString()}
             </span>
           </div>
-        ))}
+        )}
+        {libraries.map((lib) => {
+          const isSelected = selectedLibraryIds.includes(lib.id);
+          return (
+            <div
+              key={lib.id}
+              id={`lib-${lib.id}`}
+              className={clsx(styles.item, isSelected && styles.active)}
+              onClick={(e) => handleLibraryClick(lib.id, e)}
+              role="button"
+              tabIndex={0}
+              title="Click to select library; Ctrl+Click to select multiple"
+            >
+              {libraries.length > 1 && (
+                <input
+                  type="checkbox"
+                  checked={isSelected || selectedLibraryIds.length === 0}
+                  onChange={() => {}}
+                  style={{
+                    width: 12,
+                    height: 12,
+                    accentColor: 'var(--color-brand-500)',
+                    cursor: 'pointer',
+                    opacity: selectedLibraryIds.length === 0 ? 0.35 : 1,
+                    marginRight: 4,
+                  }}
+                />
+              )}
+              <IconFolder size={13} />
+              <span className={clsx(styles.itemName, 'truncate')}>{lib.name}</span>
+              <span className={styles.badge}>{(lib.assetCount || 0).toLocaleString()}</span>
+              <span
+                className={clsx(styles.itemActionBtn, styles.itemActionBtnDanger)}
+                onClick={(e) => handleRemoveLibrary(e, lib.id, lib.name)}
+                title="Remove library"
+                role="button"
+                tabIndex={0}
+              >
+                <IconTrash size={11} />
+              </span>
+            </div>
+          );
+        })}
       </SidebarSection>
 
       {/* ── Collections ── */}

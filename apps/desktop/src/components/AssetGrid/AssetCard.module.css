@@ -37,6 +37,33 @@
 }
 .card:hover .thumbImg { transform: scale(1.04); }
 
+.videoThumbWrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.thumbVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--transition-slow);
+}
+.card:hover .thumbVideo { transform: scale(1.04); }
+.videoPlayOverlay {
+  position: absolute;
+  bottom: var(--space-2);
+  right: var(--space-2);
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  pointer-events: none;
+}
+
 .thumbPlaceholder {
   width: 100%;
   height: 100%;
