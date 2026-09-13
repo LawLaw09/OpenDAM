@@ -34,8 +34,10 @@ pub async fn reveal_in_explorer(file_path: String) -> Result<()> {
 pub async fn open_with_default(file_path: String) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         std::process::Command::new("cmd")
             .args(["/C", "start", "", &file_path])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .spawn()
             .map_err(|e| e.to_string())?;
     }

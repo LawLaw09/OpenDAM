@@ -137,13 +137,16 @@ pub fn start_preview_worker(state: Arc<AppState>) {
                     }
 
                     // Call Python preview worker
-                    let mut child = match Command::new(&py_exec)
-                        .arg(&worker_py)
+                    let mut cmd = Command::new(&py_exec);
+                    cmd.arg(&worker_py)
                         .stdin(std::process::Stdio::piped())
                         .stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped())
-                        .spawn()
-                    {
+                        .stderr(std::process::Stdio::piped());
+
+                    #[cfg(windows)]
+                    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+                    let mut child = match cmd.spawn() {
                         Ok(c) => c,
                         Err(e) => {
                             tracing::error!("Failed to spawn Python: {}", e);
