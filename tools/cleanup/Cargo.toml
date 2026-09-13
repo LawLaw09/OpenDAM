@@ -1,0 +1,12 @@
+[package]
+name = "opendam-cleanup"
+version = "0.1.0"
+edition = "2021"
+description = "OpenDAM Post-Uninstall Residual Cleanup Utility"
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
