@@ -9,9 +9,10 @@ import type { FilterSpec } from '../../types';
 import {
   IconFolder, IconCollection, IconTag,
   IconChevronDown, IconChevronRight, IconPlus,
-  IconCheck, IconX, IconTrash, IconInbox,
+  IconCheck, IconX, IconTrash, IconInbox, IconFilter,
 } from '../Icons';
 import { ConfirmDeleteDialog } from '../ConfirmDeleteDialog';
+import { SmartFilterModal } from '../SmartFilterModal';
 import styles from './Sidebar.module.css';
 
 export function Sidebar() {
@@ -40,8 +41,12 @@ export function Sidebar() {
     libraries: true,
     collections: true,
     tags: true,
+    smartFilters: true,
     filters: true,
   });
+
+  const [activeSmartFilterId, setActiveSmartFilterId] = useState<string | null>(null);
+  const [isCreatingSmartFilter, setIsCreatingSmartFilter] = useState(false);
 
   // Inline creation states
   const [isCreatingTag, setIsCreatingTag] = useState(false);
@@ -151,6 +156,7 @@ export function Sidebar() {
   };
 
   const handleLibraryClick = (id: string) => {
+    setActiveSmartFilterId(null);
     if (activeLibraryId === id) {
       setActiveLibrary(null);
       setQuery({ libraryId: undefined });
@@ -162,6 +168,7 @@ export function Sidebar() {
   };
 
   const handleCollectionClick = (id: string) => {
+    setActiveSmartFilterId(null);
     if (activeCollectionId === id) {
       setActiveCollection(null);
       setQuery({ collectionId: undefined });
@@ -172,7 +179,49 @@ export function Sidebar() {
     search();
   };
 
+  const handleSmartFilterClick = (col: (typeof collections)[0]) => {
+    if (activeSmartFilterId === col.id) {
+      setActiveSmartFilterId(null);
+      setFilter({
+        kinds: undefined,
+        tags: undefined,
+        rating: undefined,
+        colorLabels: undefined,
+        extensions: undefined,
+        unorganized: undefined,
+        directory: undefined,
+        namePrefix: undefined,
+        nameSuffix: undefined,
+        collectionId: undefined,
+      });
+      search();
+    } else {
+      setActiveSmartFilterId(col.id);
+      setActiveCollection(null);
+      try {
+        const spec: FilterSpec = col.filterSpec ? JSON.parse(col.filterSpec) : {};
+        setFilter({
+          kinds: undefined,
+          tags: undefined,
+          rating: undefined,
+          colorLabels: undefined,
+          extensions: undefined,
+          unorganized: undefined,
+          directory: undefined,
+          namePrefix: undefined,
+          nameSuffix: undefined,
+          collectionId: undefined,
+          ...spec,
+        });
+        search();
+      } catch (err) {
+        console.error('Failed to parse smart filter spec:', err);
+      }
+    }
+  };
+
   const handleTagFilter = (tagId: string) => {
+    setActiveSmartFilterId(null);
     if (activeTagId === tagId) {
       // clicking the active tag clears it
       clearFilter('tags');
@@ -243,7 +292,7 @@ export function Sidebar() {
   };
 
   const renderCollectionTree = (parentId: string | null = null, depth: number = 0) => {
-    const items = collections.filter((c) => (c.parentId ?? null) === parentId);
+    const items = collections.filter((c) => !c.isSmart && (c.parentId ?? null) === parentId);
     if (items.length === 0 && (!isCreatingCollection || parentCollectionId !== parentId)) {
       return null;
     }
@@ -584,7 +633,48 @@ export function Sidebar() {
         })}
       </SidebarSection>
 
-      {/* ── Quick filters ── */}
+      {/* ── Smart Filters ── */}
+      <SidebarSection
+        label="Smart Filters"
+        icon={<IconFilter size={14} />}
+        expanded={expanded.smartFilters}
+        onToggle={() => toggle('smartFilters')}
+        onAdd={() => setIsCreatingSmartFilter(true)}
+      >
+        {collections.filter((c) => c.isSmart).length === 0 && (
+          <p className={styles.empty}>No smart filters yet</p>
+        )}
+        {collections
+          .filter((c) => c.isSmart)
+          .map((col) => {
+            const isActive = activeSmartFilterId === col.id;
+            return (
+              <div
+                key={col.id}
+                id={`smart-filter-${col.id}`}
+                className={clsx(styles.item, isActive && styles.active)}
+                onClick={() => handleSmartFilterClick(col)}
+                role="button"
+                tabIndex={0}
+              >
+                <IconFilter size={13} />
+                <span className={clsx(styles.itemName, 'truncate')}>{col.name}</span>
+                {isActive && <span className={styles.filterActiveChip}>●</span>}
+                <span
+                  className={clsx(styles.itemActionBtn, styles.itemActionBtnDanger)}
+                  onClick={(e) => handleDeleteCollection(e, col.id, col.name)}
+                  title="Delete smart filter"
+                  role="button"
+                  tabIndex={0}
+                >
+                  <IconTrash size={11} />
+                </span>
+              </div>
+            );
+          })}
+      </SidebarSection>
+
+      {/* ── Quick filters (Untouchable built-in filters) ── */}
       <SidebarSection
         label="Filters"
         icon={null}
@@ -613,6 +703,7 @@ export function Sidebar() {
               id={`sidebar-filter-${label.toLowerCase().replace(/\s+/g, '-')}`}
               className={clsx(styles.item, isActive && styles.active)}
               onClick={() => {
+                setActiveSmartFilterId(null);
                 setFilter(filter);
                 search();
               }}
@@ -630,6 +721,11 @@ export function Sidebar() {
         itemName={deleteTarget?.name ?? ''}
         onConfirm={executeDeleteTarget}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      <SmartFilterModal
+        isOpen={isCreatingSmartFilter}
+        onClose={() => setIsCreatingSmartFilter(false)}
       />
     </aside>
   );

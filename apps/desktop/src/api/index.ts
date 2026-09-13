@@ -35,8 +35,20 @@ export const api = {
 
   // Collections
   listCollections: () => invoke<Collection[]>('list_collections'),
-  createCollection: (name: string, description?: string, parentId?: string) =>
-    invoke<Collection>('create_collection', { name, description, parentId }),
+  createCollection: (
+    name: string,
+    description?: string,
+    parentId?: string,
+    isSmart?: boolean,
+    filterSpec?: string,
+  ) =>
+    invoke<Collection>('create_collection', {
+      name,
+      description,
+      parentId,
+      isSmart,
+      filterSpec,
+    }),
   addToCollection: (collectionId: string, assetIds: string[]) =>
     invoke<void>('add_to_collection', { collectionId, assetIds }),
   removeFromCollection: (collectionId: string, assetIds: string[]) =>

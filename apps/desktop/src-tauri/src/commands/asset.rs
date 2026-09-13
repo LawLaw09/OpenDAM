@@ -17,9 +17,13 @@ fn row_to_asset(
     rating: i64, color_label: String, description: String,
     thumbnail_path: Option<String>, preview_status: String,
     metadata_json: String, tags_json: Option<String>,
+    collections_json: Option<String>,
 ) -> Asset {
     let metadata = serde_json::from_str(&metadata_json).unwrap_or_default();
     let tags: Vec<String> = tags_json
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default();
+    let collections: Vec<String> = collections_json
         .and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default();
 
@@ -35,7 +39,7 @@ fn row_to_asset(
     Asset {
         id, file_path: resolved_file_path, file_name, extension, kind, size_bytes,
         modified_at, indexed_at, rating, color_label, description,
-        tags, thumbnail_path: resolved_thumb_path, preview_status, metadata,
+        tags, collections, thumbnail_path: resolved_thumb_path, preview_status, metadata,
     }
 }
 
@@ -47,7 +51,7 @@ pub async fn search_assets(
     let handle_opt = state.db.get_library_handle(payload.query.library_id.as_deref()).await;
     let (pool, root_opt) = match &handle_opt {
         Some(h) => (h.pool.clone(), Some(h.root_path.clone())),
-        None => (state.db.pool.clone(), None),
+        None => (state.db.get_active_pool().await, None),
     };
 
     let offset = payload.page * payload.page_size;
@@ -109,9 +113,10 @@ pub async fn search_assets(
     }
 
     // Collection filter (including subcollections if include_subcollections is true or unset)
-    if let Some(col_id) = &payload.query.collection_id {
+    let col_filter = payload.query.collection_id.as_ref().or(f.collection_id.as_ref());
+    if let Some(col_id) = col_filter {
         if !col_id.is_empty() {
-            let include_sub = payload.query.include_subcollections.unwrap_or(true);
+            let include_sub = f.include_subcollections.unwrap_or_else(|| payload.query.include_subcollections.unwrap_or(true));
             if include_sub {
                 conditions.push(
                     "a.id IN (
@@ -139,6 +144,28 @@ pub async fn search_assets(
         );
     }
 
+    // Smart filter conditions
+    if let Some(dir) = &f.directory {
+        if !dir.trim().is_empty() {
+            conditions.push("a.file_path LIKE ?".into());
+            binds.push(format!("%{}%", dir.trim().replace('\\', "/")));
+        }
+    }
+
+    if let Some(prefix) = &f.name_prefix {
+        if !prefix.trim().is_empty() {
+            conditions.push("a.file_name LIKE ?".into());
+            binds.push(format!("{}%", prefix.trim()));
+        }
+    }
+
+    if let Some(suffix) = &f.name_suffix {
+        if !suffix.trim().is_empty() {
+            conditions.push("a.file_name LIKE ?".into());
+            binds.push(format!("%{}", suffix.trim()));
+        }
+    }
+
     let where_clause = if conditions.is_empty() {
         String::new()
     } else {
@@ -164,7 +191,8 @@ pub async fn search_assets(
             a.size_bytes, a.modified_at, a.indexed_at, a.rating,
             a.color_label, a.description, a.thumbnail_path,
             a.preview_status, a.metadata,
-            (SELECT json_group_array(tag_id) FROM asset_tags WHERE asset_id = a.id) AS tags
+            (SELECT json_group_array(tag_id) FROM asset_tags WHERE asset_id = a.id) AS tags,
+            (SELECT json_group_array(collection_id) FROM collection_assets WHERE asset_id = a.id) AS collections
            FROM assets a
            {}
            ORDER BY {} {}
@@ -186,6 +214,7 @@ pub async fn search_assets(
         String, String, Option<String>,
         String, String,
         Option<String>,
+        Option<String>,
     )>(&data_sql);
     for b in &binds {
         data_query = data_query.bind(b.clone());
@@ -197,8 +226,8 @@ pub async fn search_assets(
     let root_ref = root_opt.as_deref();
     let assets = rows
         .into_iter()
-        .map(|(id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags)| {
-            row_to_asset(root_ref, id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags)
+        .map(|(id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols)| {
+            row_to_asset(root_ref, id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols)
         })
         .collect();
 
@@ -225,12 +254,14 @@ pub async fn get_asset(
             String, String, Option<String>,
             String, String,
             Option<String>,
+            Option<String>,
         )>(
             r#"SELECT a.id, a.file_path, a.file_name, a.extension, a.kind,
                a.size_bytes, a.modified_at, a.indexed_at, a.rating,
                a.color_label, a.description, a.thumbnail_path,
                a.preview_status, a.metadata,
-               (SELECT json_group_array(tag_id) FROM asset_tags WHERE asset_id = a.id) AS tags
+               (SELECT json_group_array(tag_id) FROM asset_tags WHERE asset_id = a.id) AS tags,
+               (SELECT json_group_array(collection_id) FROM collection_assets WHERE asset_id = a.id) AS collections
                FROM assets a WHERE a.id = ?"#,
         )
         .bind(&id)
@@ -238,35 +269,38 @@ pub async fn get_asset(
         .await
         .map_err(|e| e.to_string())?;
 
-        if let Some((id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags)) = row {
-            return Ok(row_to_asset(Some(&lib.root_path), id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags));
+        if let Some((id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols)) = row {
+            return Ok(row_to_asset(Some(&lib.root_path), id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols));
         }
     }
 
-    // Fallback to default pool
+    // Fallback to active/default pool
+    let fallback_pool = state.db.get_active_pool().await;
     let row = sqlx::query_as::<_, (
         String, String, String, String, String,
         i64, i64, i64, i64,
         String, String, Option<String>,
         String, String,
         Option<String>,
+        Option<String>,
     )>(
         r#"SELECT a.id, a.file_path, a.file_name, a.extension, a.kind,
            a.size_bytes, a.modified_at, a.indexed_at, a.rating,
            a.color_label, a.description, a.thumbnail_path,
            a.preview_status, a.metadata,
-           (SELECT json_group_array(tag_id) FROM asset_tags WHERE asset_id = a.id) AS tags
+           (SELECT json_group_array(tag_id) FROM asset_tags WHERE asset_id = a.id) AS tags,
+           (SELECT json_group_array(collection_id) FROM collection_assets WHERE asset_id = a.id) AS collections
            FROM assets a WHERE a.id = ?"#,
     )
     .bind(&id)
-    .fetch_optional(&state.db.pool)
+    .fetch_optional(&fallback_pool)
     .await
     .map_err(|e| e.to_string())?;
 
     match row {
-        Some((id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags)) => {
+        Some((id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols)) => {
             let root_opt = state.db.get_library_root(None).await;
-            Ok(row_to_asset(root_opt.as_deref(), id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags))
+            Ok(row_to_asset(root_opt.as_deref(), id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols))
         }
         None => Err(format!("Asset not found: {}", id)),
     }
@@ -279,7 +313,7 @@ pub async fn update_asset(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Asset> {
     let libs = state.db.get_all_libraries().await;
-    let mut target_pool = state.db.pool.clone();
+    let mut target_pool = state.db.get_active_pool().await;
     let mut target_root = state.db.get_library_root(None).await;
 
     for lib in libs {
@@ -326,6 +360,8 @@ pub async fn update_asset(
         sqlx::query("DELETE FROM asset_tags WHERE asset_id = ?")
             .bind(&id).execute(pool).await.map_err(|e| e.to_string())?;
         for tag_id in &tags {
+            let _ = sqlx::query("INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)")
+                .bind(tag_id).bind(tag_id).execute(pool).await;
             sqlx::query("INSERT OR IGNORE INTO asset_tags (asset_id, tag_id) VALUES (?, ?)")
                 .bind(&id).bind(tag_id).execute(pool).await.map_err(|e| e.to_string())?;
         }

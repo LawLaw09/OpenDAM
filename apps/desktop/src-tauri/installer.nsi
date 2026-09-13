@@ -232,20 +232,22 @@ Function PageReinstall
 
   nsis_tauri_utils::SemverCompare "${VERSION}" $R0
   Pop $R0
-  ; Reinstalling the same version
-  ${If} $R0 = 0
-    StrCpy $R1 "$(alreadyInstalledLong)"
-    StrCpy $R2 "$(addOrReinstall)"
-    StrCpy $R3 "$(uninstallApp)"
-    !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(chooseMaintenanceOption)"
-  ; Upgrading
-  ${ElseIf} $R0 = 1
-    StrCpy $R1 "$(olderOrUnknownVersionInstalled)"
-    StrCpy $R2 "$(uninstallBeforeInstalling)"
-    StrCpy $R3 "$(dontUninstall)"
-    !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(choowHowToInstall)"
+
+  ; Upgrading ($R0 = 1) or Reinstalling same version ($R0 = 0):
+  ; Seamlessly replace older version in-place without prompting to uninstall or messing up data
+  ${If} $R0 >= 0
+    nsExec::Exec 'taskkill /F /IM "${MAINBINARYNAME}.exe" /T'
+    nsExec::Exec 'taskkill /F /IM "opendam-desktop.exe" /T'
+    ReadRegStr $INSTDIR SHCTX "${MANUPRODUCTKEY}" ""
+    ${If} $INSTDIR == ""
+      ReadRegStr $INSTDIR SHCTX "${UNINSTKEY}" "InstallLocation"
+    ${EndIf}
+    StrCpy $UpdateMode 1
+    Abort
+  ${EndIf}
+
   ; Downgrading
-  ${ElseIf} $R0 = -1
+  ${If} $R0 = -1
     StrCpy $R1 "$(newerVersionInstalled)"
     StrCpy $R2 "$(uninstallBeforeInstalling)"
     !if "${ALLOWDOWNGRADES}" == "true"

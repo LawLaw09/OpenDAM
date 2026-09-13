@@ -126,3 +126,74 @@
   color: var(--color-text-muted);
   font-family: var(--font-mono);
 }
+
+/* Scrollable chips row at bottom */
+.chipsScroll {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(220 10% 25%) transparent;
+}
+
+.chipsScroll::-webkit-scrollbar {
+  height: 3px;
+}
+
+.chipsScroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chipsScroll::-webkit-scrollbar-thumb {
+  background: hsl(220 10% 25%);
+  border-radius: 3px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  font-size: 9.5px;
+  line-height: 1.3;
+  flex-shrink: 0;
+  max-width: 95px;
+  border: 1px solid transparent;
+  user-select: none;
+}
+
+.collectionChip {
+  background: hsl(220 14% 15%);
+  border-color: hsl(220 14% 22%);
+  color: var(--color-text-secondary);
+}
+
+.tagChip {
+  background: hsl(220 14% 13%);
+  border-color: hsl(220 14% 20%);
+  color: var(--color-text-secondary);
+}
+
+.chipIcon {
+  color: var(--color-brand-400, hsl(220 85% 65%));
+  flex-shrink: 0;
+}
+
+.chipDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.chipText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

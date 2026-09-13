@@ -52,6 +52,7 @@ export interface Asset {
   colorLabel: ColorLabel;
   description: string;
   tags: string[];       // tag IDs
+  collections?: string[]; // collection IDs
   /** Relative path to cached thumbnail (inside DAM cache dir) */
   thumbnailPath?: string;
   /** Whether a preview job is pending/running */
@@ -93,6 +94,11 @@ export interface FilterSpec {
   extensions?: string[];
   previewStatus?: Asset['previewStatus'];
   unorganized?: boolean;
+  directory?: string;
+  namePrefix?: string;
+  nameSuffix?: string;
+  collectionId?: string;
+  includeSubcollections?: boolean;
 }
 
 export interface SearchQuery {

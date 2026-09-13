@@ -123,6 +123,11 @@ impl Database {
         .execute(&master_pool)
         .await?;
 
+        // Also ensure library schema tables exist on master_pool as fallback
+        let _ = sqlx::query(include_str!("../migrations/002_library_schema.sql"))
+            .execute(&master_pool)
+            .await;
+
         let mut open_libraries = HashMap::new();
         let mut first_pool: Option<Pool<Sqlite>> = None;
 
@@ -224,6 +229,10 @@ impl Database {
         } else {
             self.pool.clone()
         }
+    }
+
+    pub async fn get_active_pool(&self) -> Pool<Sqlite> {
+        self.get_pool(None).await
     }
 
     pub async fn get_all_libraries(&self) -> Vec<LibraryHandle> {

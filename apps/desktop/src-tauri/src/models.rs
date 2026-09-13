@@ -102,6 +102,7 @@ pub struct Asset {
     pub color_label: String,
     pub description: String,
     pub tags: Vec<String>,
+    pub collections: Vec<String>,
     #[serde(rename = "thumbnailPath")]
     pub thumbnail_path: Option<String>,
     #[serde(rename = "previewStatus")]
@@ -177,7 +178,7 @@ pub struct SearchQuery {
     pub include_subcollections: Option<bool>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, Clone)]
 pub struct FilterSpec {
     pub kinds: Option<Vec<String>>,
     pub tags: Option<Vec<String>>,
@@ -186,9 +187,18 @@ pub struct FilterSpec {
     pub color_labels: Option<Vec<String>>,
     pub extensions: Option<Vec<String>>,
     pub unorganized: Option<bool>,
+    pub directory: Option<String>,
+    #[serde(rename = "namePrefix")]
+    pub name_prefix: Option<String>,
+    #[serde(rename = "nameSuffix")]
+    pub name_suffix: Option<String>,
+    #[serde(rename = "collectionId")]
+    pub collection_id: Option<String>,
+    #[serde(rename = "includeSubcollections")]
+    pub include_subcollections: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct RatingRange {
     pub min: i64,
     pub max: i64,

@@ -1,8 +1,9 @@
-import { memo, useCallback, useState, useEffect } from 'react';
+import { memo, useCallback, useState, useEffect, useMemo } from 'react';
 import clsx from 'clsx';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { Asset, AssetKind } from '../../types';
-import { IconModel3D, IconImage, IconVideo, IconStar } from '../Icons';
+import { useTagStore, useCollectionStore } from '../../store';
+import { IconModel3D, IconImage, IconVideo, IconStar, IconCollection } from '../Icons';
 import styles from './AssetCard.module.css';
 
 export interface AssetCardProps {
@@ -62,6 +63,40 @@ export const AssetCard = memo(function AssetCard({
     },
     [asset.filePath]
   );
+
+  const tagMap = useTagStore((s) => s.tagMap);
+  const collections = useCollectionStore((s) => s.collections);
+
+  const collectionMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of collections) {
+      map.set(c.id, c.name);
+    }
+    return map;
+  }, [collections]);
+
+  const chips = useMemo(() => {
+    const list: { id: string; name: string; type: 'collection' | 'tag'; color?: string }[] = [];
+    if (asset.collections && asset.collections.length > 0) {
+      for (const colId of asset.collections) {
+        const name = collectionMap.get(colId);
+        if (name) {
+          list.push({ id: `col-${colId}`, name, type: 'collection' });
+        }
+      }
+    }
+    if (asset.tags && asset.tags.length > 0) {
+      for (const tagId of asset.tags) {
+        const tag = tagMap.get(tagId);
+        if (tag) {
+          list.push({ id: `tag-${tagId}`, name: tag.name, type: 'tag', color: tag.color });
+        } else {
+          list.push({ id: `tag-${tagId}`, name: tagId, type: 'tag' });
+        }
+      }
+    }
+    return list;
+  }, [asset.collections, asset.tags, collectionMap, tagMap]);
 
   return (
     <div
@@ -143,6 +178,39 @@ export const AssetCard = memo(function AssetCard({
           )}
           <span className={styles.size}>{formatSize(asset.sizeBytes)}</span>
         </div>
+
+        {/* Scrollable tags and collections chips on bottom */}
+        {chips.length > 0 && (
+          <div
+            className={styles.chipsScroll}
+            onWheel={(e) => {
+              if (e.deltaY !== 0) {
+                e.currentTarget.scrollLeft += e.deltaY;
+              }
+            }}
+          >
+            {chips.map((chip) => (
+              <span
+                key={chip.id}
+                className={clsx(
+                  styles.chip,
+                  chip.type === 'collection' ? styles.collectionChip : styles.tagChip
+                )}
+                title={chip.type === 'collection' ? `Collection: ${chip.name}` : `Tag: ${chip.name}`}
+              >
+                {chip.type === 'collection' ? (
+                  <IconCollection size={9} className={styles.chipIcon} />
+                ) : (
+                  <span
+                    className={styles.chipDot}
+                    style={{ background: chip.color ? `var(--swatch-${chip.color})` : 'hsl(220 85% 60%)' }}
+                  />
+                )}
+                <span className={styles.chipText}>{chip.name}</span>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
