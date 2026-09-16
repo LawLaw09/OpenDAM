@@ -26,6 +26,12 @@ export const api = {
   getAsset: (id: string) => invoke<Asset>('get_asset', { id }),
   updateAsset: (id: string, patch: Partial<Asset>) =>
     invoke<Asset>('update_asset', { id, patch }),
+  deleteAsset: (id: string, deleteFile?: boolean) =>
+    invoke<void>('delete_asset', { id, deleteFile: deleteFile ?? true }),
+  deleteAssets: (ids: string[], deleteFile?: boolean) =>
+    invoke<void>('delete_assets', { ids, deleteFile: deleteFile ?? true }),
+  renameAsset: (id: string, newName: string) =>
+    invoke<Asset>('rename_asset', { id, newName }),
 
   // Tags
   listTags: () => invoke<Tag[]>('list_tags'),

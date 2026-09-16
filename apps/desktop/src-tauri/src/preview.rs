@@ -29,31 +29,73 @@ pub fn start_preview_worker(state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         // Dynamically resolve python worker and script paths
         let current_dir = std::env::current_dir().unwrap_or_default();
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| current_dir.clone());
+
+        let mut search_roots = vec![current_dir.clone(), exe_dir.clone()];
+        let mut curr = current_dir.clone();
+        for _ in 0..4 {
+            if let Some(parent) = curr.parent() {
+                search_roots.push(parent.to_path_buf());
+                curr = parent.to_path_buf();
+            } else {
+                break;
+            }
+        }
+        let mut curr_exe = exe_dir.clone();
+        for _ in 0..4 {
+            if let Some(parent) = curr_exe.parent() {
+                search_roots.push(parent.to_path_buf());
+                curr_exe = parent.to_path_buf();
+            } else {
+                break;
+            }
+        }
+
         let py_exec = if let Ok(custom) = std::env::var("OPENDAM_PYTHON") {
             PathBuf::from(custom)
         } else {
-            let candidates = [
-                current_dir.join("packages").join("preview-engine").join("venv").join("Scripts").join("pythonw.exe"),
-                current_dir.join("packages").join("preview-engine").join("venv").join("Scripts").join("python.exe"),
-                current_dir.join("packages").join("preview-engine").join("venv").join("bin").join("python"),
-                PathBuf::from("pythonw"),
-                PathBuf::from("python"),
-            ];
-            candidates.into_iter().find(|p| p.exists()).unwrap_or_else(|| PathBuf::from("python"))
+            let mut found_py = None;
+            for root in &search_roots {
+                let candidates = [
+                    root.join("packages").join("preview-engine").join("venv").join("Scripts").join("pythonw.exe"),
+                    root.join("packages").join("preview-engine").join("venv").join("Scripts").join("python.exe"),
+                    root.join("packages").join("preview-engine").join("venv").join("bin").join("python"),
+                    root.join("venv").join("Scripts").join("pythonw.exe"),
+                    root.join("venv").join("Scripts").join("python.exe"),
+                    root.join("venv").join("bin").join("python"),
+                ];
+                if let Some(p) = candidates.into_iter().find(|p| p.exists()) {
+                    found_py = Some(p);
+                    break;
+                }
+            }
+            found_py.unwrap_or_else(|| {
+                let fallbacks = [PathBuf::from("pythonw"), PathBuf::from("python")];
+                fallbacks.into_iter().find(|p| p.exists()).unwrap_or_else(|| PathBuf::from("python"))
+            })
         };
 
         let worker_py = if let Ok(custom) = std::env::var("OPENDAM_WORKER") {
             PathBuf::from(custom)
         } else {
-            let candidate = current_dir.join("packages").join("preview-engine").join("worker.py");
-            if candidate.exists() {
-                candidate
-            } else if let Ok(exe_dir) = std::env::current_exe().map(|p| p.parent().unwrap_or(&current_dir).to_path_buf()) {
-                exe_dir.join("worker.py")
-            } else {
-                PathBuf::from("worker.py")
+            let mut found_worker = None;
+            for root in &search_roots {
+                let candidates = [
+                    root.join("packages").join("preview-engine").join("worker.py"),
+                    root.join("worker.py"),
+                ];
+                if let Some(p) = candidates.into_iter().find(|p| p.exists()) {
+                    found_worker = Some(p);
+                    break;
+                }
             }
+            found_worker.unwrap_or_else(|| PathBuf::from("worker.py"))
         };
+
+        tracing::info!("Preview worker using Python: {:?}, Script: {:?}", py_exec, worker_py);
 
         loop {
             // Get all currently open libraries

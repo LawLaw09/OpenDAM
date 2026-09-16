@@ -133,7 +133,7 @@ def model_meta(source: str, output_dir: str) -> dict:
             res["preview_error"] = f"Max extract failed: {e}"
             
     elif ext == ".skp":
-        # Extract embedded thumbnail from SketchUp zip archive
+        # Extract embedded thumbnail from SketchUp archive (zip for v2021+, binary for classic v3-v2020)
         try:
             import zipfile
             import io
@@ -171,6 +171,29 @@ def model_meta(source: str, output_dir: str) -> dict:
                             out_path = Path(output_dir) / f"{p.stem}_thumb.png"
                             out_path.write_bytes(data)
                             res["thumbnail"] = str(out_path)
+            
+            # Classic SketchUp binary models (v3 through v2020) embed a PNG thumbnail in the header
+            if "thumbnail" not in res:
+                with open(source, "rb") as f:
+                    buf = f.read(1024 * 1024)
+                png_idx = buf.find(b"\x89PNG\r\n\x1a\n")
+                if png_idx != -1:
+                    try:
+                        img = Image.open(io.BytesIO(buf[png_idx:]))
+                        w, h = img.size
+                        if max(w, h) < 600:
+                            scale = max(1, int(1024 / max(w, h)))
+                            img = img.resize((w * scale, h * scale), Image.LANCZOS)
+                            if img.mode != 'RGB':
+                                img = img.convert('RGB')
+                            img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=120, threshold=2))
+                        elif img.mode != 'RGB':
+                            img = img.convert('RGB')
+                        out_path = Path(output_dir) / f"{p.stem}_thumb.png"
+                        img.save(out_path, format="PNG")
+                        res["thumbnail"] = str(out_path)
+                    except Exception:
+                        pass
         except Exception as e:
             res["preview_error"] = f"Skp extract failed: {e}"
 
@@ -277,66 +300,181 @@ def model_meta(source: str, output_dir: str) -> dict:
             import re
             import base64
             import xml.etree.ElementTree as ET
-            from PIL import Image, ImageDraw
+            import io
+            from PIL import Image, ImageDraw, ImageFilter
             
             raw_text = p.read_text(encoding="utf-8", errors="ignore")
             thumb_saved = False
-            
-            # 1. Embedded base64 preview
-            m = re.search(r'<preview[^>]*>(.+?)</preview>', raw_text, re.DOTALL | re.IGNORECASE)
-            if m:
-                b64_str = m.group(1).strip()
-                if len(b64_str) > 100:
-                    try:
-                        img_bytes = base64.b64decode(b64_str)
-                        out_path = Path(output_dir) / f"{p.stem}_thumb.jpg"
-                        out_path.write_bytes(img_bytes)
-                        res["thumbnail"] = str(out_path)
-                        thumb_saved = True
-                    except Exception:
-                        pass
-            
-            # 2. Check for referenced texture files
+            out_path = Path(output_dir) / f"{p.stem}_thumb.jpg"
+
+            def save_thumb(img_or_path) -> bool:
+                try:
+                    if isinstance(img_or_path, (str, Path)):
+                        im = Image.open(img_or_path)
+                    else:
+                        im = img_or_path
+                    if im.mode not in ("RGB", "RGBA"):
+                        im = im.convert("RGB")
+                    w, h = im.size
+                    if max(w, h) > 1024:
+                        im.thumbnail((1024, 1024), Image.LANCZOS)
+                    elif max(w, h) < 600:
+                        scale = max(1, int(1024 / max(w, h)))
+                        if scale > 1:
+                            im = im.resize((w * scale, h * scale), Image.LANCZOS)
+                    if im.mode != "RGB":
+                        im = im.convert("RGB")
+                    im.save(out_path, format="JPEG", quality=95)
+                    res["thumbnail"] = str(out_path)
+                    return True
+                except Exception:
+                    return False
+
+            # 1. Direct companion preview image in the same directory
+            for ext_cand in [".jpg", ".jpeg", ".png", ".webp"]:
+                cand = p.with_suffix(ext_cand)
+                if cand.exists() and cand.is_file():
+                    thumb_saved = save_thumb(cand)
+                    break
+                cand_prev = p.parent / f"{p.stem}_preview{ext_cand}"
+                if cand_prev.exists() and cand_prev.is_file():
+                    thumb_saved = save_thumb(cand_prev)
+                    break
+                cand_th = p.parent / f"{p.stem}_thumb{ext_cand}"
+                if cand_th.exists() and cand_th.is_file():
+                    thumb_saved = save_thumb(cand_th)
+                    break
+
+            # 2. Check dedicated preview folders (e.g. Previews/Laminate_01.png)
+            if not thumb_saved:
+                preview_dirs = [
+                    p.parent / "Previews", p.parent / "previews",
+                    p.parent / "Preview", p.parent / "preview",
+                    p.parent / "Renders", p.parent / "renders",
+                    p.parent.parent / "Previews", p.parent.parent / "previews",
+                ]
+                for pdir in preview_dirs:
+                    if pdir.exists() and pdir.is_dir():
+                        valid_imgs = [
+                            f for f in pdir.iterdir()
+                            if f.is_file() and f.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]
+                        ]
+                        if valid_imgs:
+                            stem_lower = p.stem.lower()
+                            matched = None
+                            for f in valid_imgs:
+                                fn_lower = f.stem.lower()
+                                if fn_lower in stem_lower or stem_lower in fn_lower:
+                                    matched = f
+                                    break
+                            best_img = matched or valid_imgs[0]
+                            thumb_saved = save_thumb(best_img)
+                            break
+
+            # 3. Embedded base64 preview inside VRMAT XML
+            if not thumb_saved:
+                m = re.search(r'<preview[^>]*>(.+?)</preview>', raw_text, re.DOTALL | re.IGNORECASE)
+                if m:
+                    b64_str = m.group(1).strip()
+                    if len(b64_str) > 100:
+                        try:
+                            img_bytes = base64.b64decode(b64_str)
+                            im = Image.open(io.BytesIO(img_bytes))
+                            thumb_saved = save_thumb(im)
+                        except Exception:
+                            pass
+
+            # 4. Check referenced textures in XML (Strictly prioritize Diffuse/Color over Normal/Bump/Gloss/Mask)
             if not thumb_saved:
                 try:
                     root = ET.fromstring(raw_text)
+                    texture_candidates = []
+
                     for param in root.findall(".//parameter"):
-                        if param.get("name") in ["file", "bitmap", "filename"]:
+                        pname = (param.get("name") or "").lower()
+                        plabel = (param.get("label") or "").lower()
+                        if pname in ["file", "bitmap", "filename"] or "texture" in pname or "color" in pname:
                             for val in param.findall(".//value"):
-                                if val.text and any(val.text.lower().endswith(im_ext) for im_ext in [".jpg", ".jpeg", ".png", ".tif", ".tga", ".bmp"]):
+                                if val.text and any(val.text.lower().endswith(im_ext) for im_ext in [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".tga", ".bmp", ".webp"]):
                                     tex_name = Path(val.text.strip()).name
-                                    candidates = [
+                                    search_paths = [
                                         p.parent / tex_name,
                                         p.parent / "maps" / tex_name,
+                                        p.parent / "textures" / tex_name,
                                         p.parent.parent / "maps" / tex_name,
+                                        p.parent.parent / "textures" / tex_name,
                                     ]
-                                    for cand in candidates:
-                                        if cand.exists():
-                                            img = Image.open(cand)
-                                            img.thumbnail((256, 256), Image.LANCZOS)
-                                            out_path = Path(output_dir) / f"{p.stem}_thumb.jpg"
-                                            img.save(out_path, format="JPEG")
-                                            res["thumbnail"] = str(out_path)
-                                            thumb_saved = True
+                                    for sp in search_paths:
+                                        if sp.exists() and sp.is_file():
+                                            tex_lower = tex_name.lower()
+                                            score = 10
+                                            if any(k in tex_lower for k in ["diff", "alb", "base", "color", "col", "tex"]):
+                                                score += 60
+                                            if any(k in pname or k in plabel for k in ["diffuse", "albedo", "color", "base"]):
+                                                score += 50
+                                            if any(k in tex_lower for k in ["norm", "nrm"]):
+                                                score -= 100
+                                            if any(k in tex_lower for k in ["bump", "bmp"]):
+                                                score -= 80
+                                            if any(k in tex_lower for k in ["gloss", "glos", "gl"]):
+                                                score -= 70
+                                            if any(k in tex_lower for k in ["rough", "rgh"]):
+                                                score -= 70
+                                            if any(k in tex_lower for k in ["mask", "msk"]):
+                                                score -= 60
+                                            if any(k in tex_lower for k in ["disp", "height"]):
+                                                score -= 60
+                                            if any(k in tex_lower for k in ["alpha", "opac"]):
+                                                score -= 60
+                                            if any(k in tex_lower for k in ["ao", "ambient"]):
+                                                score -= 50
+                                            if any(k in tex_lower for k in ["refl", "spec"]):
+                                                score -= 40
+
+                                            texture_candidates.append((score, sp))
                                             break
-                                if thumb_saved:
-                                    break
-                        if thumb_saved:
-                            break
+
+                    if texture_candidates:
+                        texture_candidates.sort(key=lambda x: x[0], reverse=True)
+                        best_tex = texture_candidates[0][1]
+                        thumb_saved = save_thumb(best_tex)
                 except Exception:
                     pass
 
-            # 3. Fallback: Stylized material sphere swatch
+            # 5. Fallback: Render a realistic material sphere swatch using color from XML
             if not thumb_saved:
-                swatch = Image.new("RGB", (256, 256), (28, 30, 36))
+                sphere_color = (80, 110, 160)
+                try:
+                    color_matches = re.findall(r'<parameter[^>]*name=["\'](?:color|diffuse|diffuse_color|base_color)["\'][^>]*>.*?<r>([0-9.]+)</r>.*?<g>([0-9.]+)</g>.*?<b>([0-9.]+)</b>', raw_text, re.DOTALL | re.IGNORECASE)
+                    if color_matches:
+                        r, g, b = [float(x) for x in color_matches[0]]
+                        sphere_color = (
+                            max(15, min(245, int(r * 255))),
+                            max(15, min(245, int(g * 255))),
+                            max(15, min(245, int(b * 255))),
+                        )
+                except Exception:
+                    pass
+
+                size = 512
+                swatch = Image.new("RGB", (size, size), (24, 26, 32))
                 draw = ImageDraw.Draw(swatch)
-                for r in range(95, 0, -1):
-                    frac = (95 - r) / 95.0
-                    col = int(120 + 110 * frac)
-                    c_col = int(80 + 90 * frac)
-                    draw.ellipse([128 - r - int(frac*18), 128 - r - int(frac*18), 128 + r - int(frac*18), 128 + r - int(frac*18)], fill=(col, c_col, int(200 + 40*frac)))
-                out_path = Path(output_dir) / f"{p.stem}_thumb.jpg"
-                swatch.save(out_path, format="JPEG")
+                radius = int(size * 0.38)
+                cx, cy = size // 2, size // 2
+                light_x, light_y = cx - int(radius * 0.35), cy - int(radius * 0.35)
+
+                sr, sg, sb = sphere_color
+                for r_step in range(radius, 0, -2):
+                    frac = 1.0 - (r_step / float(radius))
+                    cr = min(255, int(sr * 0.45 + (255 - sr * 0.45) * (frac ** 2.2)))
+                    cg = min(255, int(sg * 0.45 + (255 - sg * 0.45) * (frac ** 2.2)))
+                    cb = min(255, int(sb * 0.45 + (255 - sb * 0.45) * (frac ** 2.2)))
+                    step_cx = int(cx + (light_x - cx) * (frac ** 0.8))
+                    step_cy = int(cy + (light_y - cy) * (frac ** 0.8))
+                    draw.ellipse([step_cx - r_step, step_cy - r_step, step_cx + r_step, step_cy + r_step], fill=(cr, cg, cb))
+
+                swatch = swatch.filter(ImageFilter.SMOOTH)
+                swatch.save(out_path, format="JPEG", quality=95)
                 res["thumbnail"] = str(out_path)
         except Exception as e:
             res["preview_error"] = f"Vrmat preview failed: {e}"

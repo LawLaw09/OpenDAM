@@ -185,7 +185,7 @@ export function Sidebar() {
     const nextSelected = useUIStore.getState().selectedLibraryIds;
     setQuery({
       libraryIds: nextSelected.length > 0 ? nextSelected : undefined,
-      libraryId: undefined,
+      libraryId: nextSelected.length === 1 ? nextSelected[0] : undefined,
       collectionId: undefined,
     });
     search();
@@ -484,16 +484,20 @@ export function Sidebar() {
               {libraries.length > 1 && (
                 <input
                   type="checkbox"
-                  checked={isSelected || selectedLibraryIds.length === 0}
+                  checked={isSelected}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleLibraryClick(lib.id, e);
+                  }}
                   onChange={() => {}}
                   style={{
-                    width: 12,
-                    height: 12,
+                    width: 13,
+                    height: 13,
                     accentColor: 'var(--color-brand-500)',
                     cursor: 'pointer',
-                    opacity: selectedLibraryIds.length === 0 ? 0.35 : 1,
-                    marginRight: 4,
+                    marginRight: 6,
                   }}
+                  title="Toggle this library in filter"
                 />
               )}
               <IconFolder size={13} />

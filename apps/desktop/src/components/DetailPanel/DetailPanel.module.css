@@ -102,8 +102,55 @@
   transition: color var(--transition-fast), background var(--transition-fast);
 }
 .actionBtn:hover {
+  background: var(--color-bg-subtle);
   color: var(--color-text-primary);
-  background: var(--color-bg-elevated);
+}
+.actionBtnDanger:hover {
+  color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.12) !important;
+}
+.nameEditForm {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.nameInput {
+  flex: 1;
+  padding: 2px 6px;
+  background: var(--color-bg-base);
+  border: 1px solid var(--color-brand-500);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  outline: none;
+  min-width: 0;
+}
+.nameActionBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.nameActionBtnConfirm {
+  color: #10b981;
+}
+.nameActionBtnConfirm:hover {
+  background: rgba(16, 185, 129, 0.15);
+}
+.nameActionBtnCancel {
+  color: var(--color-text-muted);
+}
+.nameActionBtnCancel:hover {
+  color: var(--color-text-primary);
 }
 
 /* Tabs */

@@ -34,6 +34,7 @@ image = { version = "0.25", features = ["jpeg", "png", "tiff", "bmp", "gif"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dirs = "5"
+trash = "5"
 
 [profile.release]
 panic = "abort"

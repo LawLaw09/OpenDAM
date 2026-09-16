@@ -169,6 +169,9 @@ interface AssetStore {
   setPage: (page: number) => void;
   search: () => Promise<void>;
   patchAsset: (id: string, patch: Partial<Asset>) => Promise<void>;
+  deleteAsset: (id: string, deleteFile?: boolean) => Promise<void>;
+  deleteAssets: (ids: string[], deleteFile?: boolean) => Promise<void>;
+  renameAsset: (id: string, newName: string) => Promise<Asset>;
   updateAssetPreview: (id: string, thumbnailPath?: string, previewModel?: string) => void;
   setPreviewStatus: (id: string, status: Asset['previewStatus']) => void;
   getById: (id: string) => Asset | undefined;
@@ -252,6 +255,51 @@ export const useAssetStore = create<AssetStore>()((set, get) => ({
       assets: s.assets.map((a) => (a.id === id ? updated : a)),
       assetMap: new Map(s.assetMap).set(id, updated),
     }));
+  },
+
+  deleteAsset: async (id, deleteFile = true) => {
+    await api.deleteAsset(id, deleteFile);
+    set((s) => {
+      const assets = s.assets.filter((a) => a.id !== id);
+      const assetMap = new Map(s.assetMap);
+      assetMap.delete(id);
+      return { assets, total: Math.max(0, s.total - 1), assetMap };
+    });
+    const ui = useUIStore.getState();
+    if (ui.focusedAssetId === id) {
+      ui.focusAsset(null);
+    }
+    if (ui.selectedAssetIds.has(id)) {
+      const next = new Set(ui.selectedAssetIds);
+      next.delete(id);
+      ui.selectAll(Array.from(next));
+    }
+  },
+
+  deleteAssets: async (ids, deleteFile = true) => {
+    await api.deleteAssets(ids, deleteFile);
+    const idSet = new Set(ids);
+    set((s) => {
+      const assets = s.assets.filter((a) => !idSet.has(a.id));
+      const assetMap = new Map(s.assetMap);
+      for (const id of ids) assetMap.delete(id);
+      return { assets, total: Math.max(0, s.total - ids.length), assetMap };
+    });
+    const ui = useUIStore.getState();
+    if (ui.focusedAssetId && idSet.has(ui.focusedAssetId)) {
+      ui.focusAsset(null);
+    }
+    const next = new Set(Array.from(ui.selectedAssetIds).filter((id) => !idSet.has(id)));
+    ui.selectAll(Array.from(next));
+  },
+
+  renameAsset: async (id, newName) => {
+    const updated = await api.renameAsset(id, newName);
+    set((s) => ({
+      assets: s.assets.map((a) => (a.id === id ? updated : a)),
+      assetMap: new Map(s.assetMap).set(id, updated),
+    }));
+    return updated;
   },
 
   updateAssetPreview: (id, thumbnailPath, previewModel) => {

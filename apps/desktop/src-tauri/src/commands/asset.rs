@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::path::Path;
-use tauri::State;
+use tauri::{State, Emitter};
 use serde_json;
 
 use crate::AppState;
@@ -19,7 +19,12 @@ fn row_to_asset(
     metadata_json: String, tags_json: Option<String>,
     collections_json: Option<String>,
 ) -> Asset {
-    let metadata = serde_json::from_str(&metadata_json).unwrap_or_default();
+    let mut metadata: std::collections::HashMap<String, serde_json::Value> =
+        serde_json::from_str(&metadata_json).unwrap_or_default();
+    if let (Some(r), Some(pm)) = (root, metadata.get("preview_model").and_then(|v| v.as_str())) {
+        let abs_pm = resolve_path(r, pm);
+        metadata.insert("preview_model".to_string(), serde_json::Value::String(abs_pm));
+    }
     let tags: Vec<String> = tags_json
         .and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default();
@@ -621,5 +626,171 @@ pub async fn update_asset(
         }
     }
 
+    get_asset(id, state).await
+}
+
+#[tauri::command]
+pub async fn delete_asset(
+    id: String,
+    delete_file: Option<bool>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    let should_delete_file = delete_file.unwrap_or(true);
+    let libs = state.db.get_all_libraries().await;
+    let mut target_pools = Vec::new();
+    let mut file_to_delete: Option<std::path::PathBuf> = None;
+
+    for lib in &libs {
+        let row: Option<(String,)> = sqlx::query_as("SELECT file_path FROM assets WHERE id = ?")
+            .bind(&id)
+            .fetch_optional(&lib.pool)
+            .await
+            .unwrap_or(None);
+
+        if let Some((fp,)) = row {
+            let abs_path = if Path::new(&fp).is_absolute() {
+                std::path::PathBuf::from(fp)
+            } else {
+                lib.root_path.join(fp)
+            };
+            file_to_delete = Some(abs_path);
+            target_pools.push(lib.pool.clone());
+        }
+    }
+
+    target_pools.push(state.db.master_pool.clone());
+    target_pools.push(state.db.get_active_pool().await);
+
+    // If deleting from filesystem
+    if should_delete_file {
+        if let Some(ref path) = file_to_delete {
+            if path.exists() {
+                // Try moving to Recycle Bin first
+                if let Err(trash_err) = trash::delete(path) {
+                    tracing::warn!("Failed to trash {:?}, falling back to remove_file: {}", path, trash_err);
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+    }
+
+    // Delete records from databases
+    for pool in target_pools {
+        let _ = sqlx::query("DELETE FROM asset_tags WHERE asset_id = ?").bind(&id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM collection_assets WHERE asset_id = ?").bind(&id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM preview_jobs WHERE asset_id = ?").bind(&id).execute(&pool).await;
+        let _ = sqlx::query("DELETE FROM assets WHERE id = ?").bind(&id).execute(&pool).await;
+        let _ = sqlx::query("UPDATE libraries SET asset_count = (SELECT COUNT(*) FROM assets)").execute(&pool).await;
+    }
+
+    let _ = state.app_handle.emit("library:updated", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_assets(
+    ids: Vec<String>,
+    delete_file: Option<bool>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    for id in ids {
+        let _ = delete_asset(id, delete_file, state.clone()).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn rename_asset(
+    id: String,
+    new_name: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Asset> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("Asset file name cannot be empty".into());
+    }
+
+    let invalid_chars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
+    if trimmed.chars().any(|c| invalid_chars.contains(&c)) {
+        return Err("File name contains invalid characters: \\ / : * ? \" < > |".into());
+    }
+
+    let libs = state.db.get_all_libraries().await;
+    let mut found_lib = None;
+    let mut current_fp = None;
+    let mut current_ext = None;
+
+    for lib in &libs {
+        let row: Option<(String, String)> = sqlx::query_as("SELECT file_path, extension FROM assets WHERE id = ?")
+            .bind(&id)
+            .fetch_optional(&lib.pool)
+            .await
+            .unwrap_or(None);
+
+        if let Some((fp, ext)) = row {
+            found_lib = Some(lib.clone());
+            current_fp = Some(fp);
+            current_ext = Some(ext);
+            break;
+        }
+    }
+
+    let (lib, old_rel_fp, old_ext) = match (found_lib, current_fp, current_ext) {
+        (Some(l), Some(fp), Some(ext)) => (l, fp, ext),
+        _ => return Err(format!("Asset not found: {}", id)),
+    };
+
+    let old_abs_path = if Path::new(&old_rel_fp).is_absolute() {
+        std::path::PathBuf::from(&old_rel_fp)
+    } else {
+        lib.root_path.join(&old_rel_fp)
+    };
+
+    let parent_dir = old_abs_path
+        .parent()
+        .ok_or_else(|| "Could not determine parent directory".to_string())?;
+
+    // Determine new filename and extension
+    let (final_name, new_ext) = if let Some((stem, ext)) = trimmed.rsplit_once('.') {
+        if !stem.is_empty() && !ext.is_empty() {
+            (trimmed.to_string(), ext.to_lowercase())
+        } else {
+            (format!("{}.{}", trimmed, old_ext), old_ext.clone())
+        }
+    } else {
+        (format!("{}.{}", trimmed, old_ext), old_ext.clone())
+    };
+
+    let new_abs_path = parent_dir.join(&final_name);
+
+    if new_abs_path.exists() && new_abs_path != old_abs_path {
+        return Err(format!("A file named '{}' already exists in this folder", final_name));
+    }
+
+    // Rename file on disk
+    if old_abs_path.exists() {
+        std::fs::rename(&old_abs_path, &new_abs_path)
+            .map_err(|e| format!("Failed to rename file on disk: {}", e))?;
+    }
+
+    let new_rel_fp = make_relative_path(&lib.root_path, &new_abs_path);
+    let now = chrono::Utc::now().timestamp_millis();
+
+    // Update in all relevant databases
+    let pools_to_update = vec![lib.pool.clone(), state.db.master_pool.clone(), state.db.get_active_pool().await];
+    for pool in pools_to_update {
+        let _ = sqlx::query(
+            "UPDATE assets SET file_name = ?, file_path = ?, extension = ?, modified_at = ? WHERE id = ?"
+        )
+        .bind(&final_name)
+        .bind(&new_rel_fp)
+        .bind(&new_ext)
+        .bind(now)
+        .bind(&id)
+        .execute(&pool)
+        .await;
+    }
+
+    let _ = state.app_handle.emit("library:updated", ());
     get_asset(id, state).await
 }

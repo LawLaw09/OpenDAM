@@ -1,9 +1,10 @@
-import { useCallback, useState, useMemo } from 'react';
+import { useCallback, useState, useMemo, useEffect } from 'react';
 import clsx from 'clsx';
 import { useUIStore, useAssetStore, useTagStore, useCollectionStore } from '../../store';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { Asset, ColorLabel, Collection } from '../../types';
-import { IconStar, IconX, IconExternal, IconEye, IconInfo, IconCopy, IconCheck, IconRefresh } from '../Icons';
+import { IconStar, IconX, IconExternal, IconEye, IconInfo, IconCopy, IconCheck, IconRefresh, IconEdit, IconTrash } from '../Icons';
+import { ConfirmDeleteDialog } from '../ConfirmDeleteDialog';
 import { api } from '../../api';
 import { ThreeViewer } from './ThreeViewer';
 import styles from './DetailPanel.module.css';
@@ -18,11 +19,26 @@ export function DetailPanel() {
     focusedAssetId ? s.assets.find((a) => a.id === focusedAssetId) ?? s.assetMap.get(focusedAssetId) ?? null : null
   );
   const patchAsset = useAssetStore((s) => s.patchAsset);
+  const deleteAsset = useAssetStore((s) => s.deleteAsset);
+  const renameAsset = useAssetStore((s) => s.renameAsset);
   const tags = useTagStore((s) => s.tags);
   const collections = useCollectionStore((s) => s.collections);
   const addToCollection = useCollectionStore((s) => s.addToCollection);
   const removeFromCollection = useCollectionStore((s) => s.removeFromCollection);
   const [tab, setTab] = useState<'info' | 'tags' | 'collections' | 'preview'>('info');
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editingName, setEditingName] = useState('');
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+
+  useEffect(() => {
+    setIsEditingName(false);
+    setNameError(null);
+    if (asset) {
+      setEditingName(asset.fileName);
+    }
+  }, [asset?.id]);
 
   const setRating = useCallback(
     (rating: number) => asset && patchAsset(asset.id, { rating }),
@@ -56,6 +72,40 @@ export function DetailPanel() {
       setPreviewStatus(asset.id, 'error');
     }
   }, [asset, setPreviewStatus]);
+
+  const handleStartRename = () => {
+    if (!asset) return;
+    setIsEditingName(true);
+    setEditingName(asset.fileName);
+    setNameError(null);
+  };
+
+  const handleSaveRename = async () => {
+    if (!asset) return;
+    const trimmed = editingName.trim();
+    if (!trimmed || trimmed === asset.fileName) {
+      setIsEditingName(false);
+      setNameError(null);
+      return;
+    }
+    try {
+      await renameAsset(asset.id, trimmed);
+      setIsEditingName(false);
+      setNameError(null);
+    } catch (err: any) {
+      setNameError(err?.message || String(err));
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!asset) return;
+    setIsDeleteDialogOpen(false);
+    try {
+      await deleteAsset(asset.id, true);
+    } catch (err) {
+      console.error('Failed to delete asset:', err);
+    }
+  };
 
   if (!asset) {
     return (
@@ -114,8 +164,69 @@ export function DetailPanel() {
 
       {/* File name + actions */}
       <div className={styles.header}>
-        <p className={clsx(styles.fileName, 'truncate')} title={asset.fileName}>{asset.fileName}</p>
+        {isEditingName ? (
+          <form
+            className={styles.nameEditForm}
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSaveRename();
+            }}
+          >
+            <input
+              type="text"
+              autoFocus
+              className={styles.nameInput}
+              value={editingName}
+              onChange={(e) => {
+                setEditingName(e.target.value);
+                if (nameError) setNameError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setIsEditingName(false);
+                  setNameError(null);
+                }
+              }}
+            />
+            <button
+              type="submit"
+              className={clsx(styles.nameActionBtn, styles.nameActionBtnConfirm)}
+              title="Save name"
+            >
+              <IconCheck size={13} />
+            </button>
+            <button
+              type="button"
+              className={clsx(styles.nameActionBtn, styles.nameActionBtnCancel)}
+              onClick={() => {
+                setIsEditingName(false);
+                setNameError(null);
+              }}
+              title="Cancel"
+            >
+              <IconX size={13} />
+            </button>
+          </form>
+        ) : (
+          <p
+            className={clsx(styles.fileName, 'truncate')}
+            title="Double-click or click edit icon to rename"
+            onDoubleClick={handleStartRename}
+            style={{ cursor: 'pointer' }}
+          >
+            {asset.fileName}
+          </p>
+        )}
+
         <div className={styles.headerActions}>
+          <button
+            id="detail-rename"
+            className={styles.actionBtn}
+            title="Rename file (F2)"
+            onClick={handleStartRename}
+          >
+            <IconEdit size={14} />
+          </button>
           <button
             id="detail-gen-preview-header"
             className={clsx(styles.actionBtn, isPending && styles.actionBtnLoading)}
@@ -161,8 +272,22 @@ export function DetailPanel() {
           >
             <IconCopy size={14} />
           </button>
+          <button
+            id="detail-delete"
+            className={clsx(styles.actionBtn, styles.actionBtnDanger)}
+            title="Delete file (Move to Recycle Bin)"
+            onClick={() => setIsDeleteDialogOpen(true)}
+          >
+            <IconTrash size={14} />
+          </button>
         </div>
       </div>
+
+      {nameError && (
+        <div style={{ color: '#ef4444', fontSize: '11px', padding: '2px 16px', background: 'rgba(239, 68, 68, 0.1)' }}>
+          {nameError}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className={styles.tabs}>
@@ -203,6 +328,14 @@ export function DetailPanel() {
           <PreviewTab asset={asset} onGeneratePreview={handleGeneratePreview} />
         )}
       </div>
+
+      <ConfirmDeleteDialog
+        isOpen={isDeleteDialogOpen}
+        itemType="asset"
+        itemName={asset.fileName}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setIsDeleteDialogOpen(false)}
+      />
     </aside>
   );
 }

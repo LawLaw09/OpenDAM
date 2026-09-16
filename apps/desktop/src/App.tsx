@@ -6,6 +6,7 @@ import { AssetGrid } from './components/AssetGrid/AssetGrid';
 import { DetailPanel } from './components/DetailPanel/DetailPanel';
 import { StatusBar } from './components/StatusBar/StatusBar';
 import { QuickLookModal } from './components/QuickLook/QuickLookModal';
+import { ConfirmDeleteDialog } from './components/ConfirmDeleteDialog';
 import { IconCheck } from './components/Icons';
 import { useUIStore } from './store';
 import { useLibraryStore, useTagStore, useCollectionStore, useAssetStore } from './store';
@@ -31,6 +32,8 @@ export default function App() {
 
   const [quickLookOpen, setQuickLookOpen] = useState(false);
   const [copyToast, setCopyToast] = useState<string | null>(null);
+  const [assetsToDelete, setAssetsToDelete] = useState<string[]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const toastTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -98,6 +101,30 @@ export default function App() {
         }
       }
 
+      // Delete selected asset(s) with Delete or Backspace key
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditingText()) {
+        const selectedIds = useUIStore.getState().selectedAssetIds;
+        const focusedId = useUIStore.getState().focusedAssetId;
+        const ids = selectedIds.size > 0 ? Array.from(selectedIds) : focusedId ? [focusedId] : [];
+        if (ids.length > 0) {
+          e.preventDefault();
+          setAssetsToDelete(ids);
+          setDeleteDialogOpen(true);
+          return;
+        }
+      }
+
+      // F2 to trigger rename on focused asset
+      if (e.key === 'F2' && !isEditingText()) {
+        const focusedId = useUIStore.getState().focusedAssetId;
+        if (focusedId) {
+          e.preventDefault();
+          const renameBtn = document.getElementById('detail-rename');
+          renameBtn?.click();
+          return;
+        }
+      }
+
       // Hold Spacebar for Quick Look preview
       if (e.code === 'Space' && !isEditingText()) {
         const focusedId = useUIStore.getState().focusedAssetId;
@@ -140,6 +167,22 @@ export default function App() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handleConfirmAppDelete = async () => {
+    if (assetsToDelete.length === 0) return;
+    const count = assetsToDelete.length;
+    setDeleteDialogOpen(false);
+    try {
+      await useAssetStore.getState().deleteAssets(assetsToDelete, true);
+      setCopyToast(count === 1 ? 'Moved file to Recycle Bin' : `Moved ${count} files to Recycle Bin`);
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      toastTimeoutRef.current = window.setTimeout(() => setCopyToast(null), 2200);
+    } catch (err) {
+      console.error('Failed to delete assets:', err);
+    } finally {
+      setAssetsToDelete([]);
+    }
+  };
+
   return (
     <div className={styles.layout}>
       <Toolbar />
@@ -154,6 +197,22 @@ export default function App() {
 
       {/* Spacebar Quick Look Modal */}
       <QuickLookModal asset={focusedAsset} isOpen={quickLookOpen} />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDeleteDialog
+        isOpen={deleteDialogOpen}
+        itemType={assetsToDelete.length > 1 ? 'assets' : 'asset'}
+        itemName={
+          assetsToDelete.length === 1
+            ? useAssetStore.getState().getById(assetsToDelete[0])?.fileName || '1 file'
+            : `${assetsToDelete.length} files`
+        }
+        onConfirm={handleConfirmAppDelete}
+        onCancel={() => {
+          setDeleteDialogOpen(false);
+          setAssetsToDelete([]);
+        }}
+      />
 
       {/* Copy Path Feedback Toast */}
       {copyToast && (
