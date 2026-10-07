@@ -2,11 +2,74 @@ use anyhow::Result;
 use chrono::Utc;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, UNIX_EPOCH};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::db::{make_relative_path, Database};
 use crate::models::AssetKind;
+
+// ── Advisory lock guard ─────────────────────────────────────────────────────
+
+/// RAII guard: writes `.opendam/index.lock` on creation, removes it on drop.
+/// On NAS, multiple machines may attempt to re-index simultaneously on startup.
+/// The second machine detects the lock and skips indexing, preventing interleaved
+/// batch writes that would corrupt the asset catalogue.
+struct IndexLock(PathBuf);
+
+impl IndexLock {
+    /// Try to acquire the lock.
+    ///
+    /// Returns `None` if another instance acquired the lock within the last
+    /// `stale_after` seconds (default: 120s). Returns `Some(guard)` on success.
+    fn try_acquire(opendam_dir: &Path, stale_after: u64) -> Option<Self> {
+        let lock_path = opendam_dir.join("index.lock");
+
+        // If the lock file exists and is recent, another indexer is running.
+        if let Ok(meta) = std::fs::metadata(&lock_path) {
+            if let Ok(modified) = meta.modified() {
+                let age = modified
+                    .duration_since(UNIX_EPOCH)
+                    .map(|t| {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        now.saturating_sub(t.as_secs())
+                    })
+                    .unwrap_or(u64::MAX);
+                if age < stale_after {
+                    tracing::info!(
+                        "index.lock is {}s old — another machine is indexing, skipping.",
+                        age
+                    );
+                    return None;
+                }
+            }
+        }
+
+        // Write current Unix timestamp into the lock file.
+        let ts = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs()
+            .to_string();
+
+        if let Err(e) = std::fs::write(&lock_path, &ts) {
+            // Couldn't write — NAS may be read-only. Log and proceed anyway
+            // (best-effort: don't block indexing just because we can't lock).
+            tracing::warn!("Could not write index.lock at {:?}: {} — proceeding without lock", lock_path, e);
+        }
+
+        Some(IndexLock(lock_path))
+    }
+}
+
+impl Drop for IndexLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
 
 // Supported extensions
 const SUPPORTED_EXTENSIONS: &[&str] = &[
@@ -69,6 +132,7 @@ struct PendingAsset {
 /// 2. Skips `.opendam` directory.
 /// 3. Pre-checks `.opendam/thumbs/` to never re-render existing previews across network.
 /// 4. Groups writes into chunks of 200 inside single transactions (cutting NAS I/O by 99%).
+/// 5. Advisory index.lock prevents two machines from indexing the same library simultaneously.
 pub async fn index_paths(db: &Database, library_id: &str, paths: &[String]) -> Result<()> {
     let handle_opt = db.get_library_handle(Some(library_id)).await;
     let (pool, root_path) = match handle_opt {
@@ -78,6 +142,14 @@ pub async fn index_paths(db: &Database, library_id: &str, paths: &[String]) -> R
             (db.pool.clone(), p)
         }
     };
+
+    // ── Advisory lock: skip if another machine is already indexing ────────
+    let opendam_dir = root_path.join(".opendam");
+    let _lock = match IndexLock::try_acquire(&opendam_dir, 120) {
+        Some(guard) => guard,
+        None => return Ok(()), // another instance is indexing — yield
+    };
+
 
     let thumbs_dir = root_path.join(".opendam").join("thumbs");
     let now = Utc::now().timestamp_millis();
@@ -182,6 +254,7 @@ pub async fn index_paths(db: &Database, library_id: &str, paths: &[String]) -> R
                 let needs_preview = matches!(
                     ext.as_str(),
                     "max" | "fbx" | "obj" | "gltf" | "glb" | "dae" | "stl" | "3ds" | "skp" | "rfa" | "rvt" | "dwg" | "3dm" | "vrmat" | "psd" | "psb" | "ai" | "exr" | "hdr"
+                    | "jpg" | "jpeg" | "png" | "tif" | "tiff" | "tga" | "bmp" | "webp"
                 );
                 if needs_preview {
                     preview_status = "pending";
@@ -293,9 +366,9 @@ async fn commit_asset_batch(pool: &sqlx::Pool<sqlx::Sqlite>, batch: &[PendingAss
             sqlx::query(
                 r#"INSERT INTO assets
                    (id, file_path, file_name, extension, kind, size_bytes,
-                    modified_at, indexed_at, rating, color_label, description,
+                    modified_at, indexed_at, rating, color_label, is_favorite, description,
                     thumbnail_path, preview_status, metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'none', '', ?, ?, '{}')"#
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'none', 0, '', ?, ?, '{}')"#
             )
             .bind(&item.id)
             .bind(&item.file_path)
@@ -329,6 +402,7 @@ async fn commit_asset_batch(pool: &sqlx::Pool<sqlx::Sqlite>, batch: &[PendingAss
 }
 
 /// LibraryWatcher placeholder
+#[derive(Default)]
 pub struct LibraryWatcher {}
 
 impl LibraryWatcher {

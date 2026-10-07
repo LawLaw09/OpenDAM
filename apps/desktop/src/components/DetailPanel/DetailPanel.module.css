@@ -109,6 +109,50 @@
   color: #ef4444 !important;
   background: rgba(239, 68, 68, 0.12) !important;
 }
+.actionBtnFavorite {
+  color: hsl(350 90% 60%) !important;
+}
+.actionBtnFavorite:hover {
+  color: hsl(350 95% 70%) !important;
+  background: hsl(350 85% 55% / 0.15) !important;
+}
+
+.favoriteRow {
+  display: flex;
+  align-items: center;
+}
+
+.infoFavoriteBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--color-bg-base);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.infoFavoriteBtn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-focus);
+}
+
+.infoFavoriteActive {
+  background: hsl(350 85% 55% / 0.15);
+  border-color: hsl(350 85% 60% / 0.5);
+  color: hsl(350 90% 65%);
+}
+
+.favoriteHeartFilled {
+  color: hsl(350 89% 60%);
+  filter: drop-shadow(0 0 3px hsl(350 89% 60% / 0.5));
+}
 .nameEditForm {
   flex: 1;
   display: flex;

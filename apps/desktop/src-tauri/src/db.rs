@@ -20,14 +20,18 @@ pub struct Database {
     pub pool: Pool<Sqlite>,
 }
 
-/// Connect to a per-library SQLite database with NAS-optimized Pragmas
+/// Connect to a per-library SQLite database with NAS-safe settings.
+/// WAL mode is intentionally avoided: on SMB/NFS shares the -shm shared-memory
+/// locking that WAL requires is unreliable and can silently corrupt the database
+/// when multiple machines write concurrently. DELETE (rollback) journal is the
+/// SQLite-recommended safe choice for any network filesystem.
 pub async fn connect_library_sqlite(db_path: &Path) -> Result<Pool<Sqlite>> {
     let options = SqliteConnectOptions::new()
         .filename(db_path)
         .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
+        .journal_mode(SqliteJournalMode::Delete)  // safe on SMB/NFS; WAL is not
         .synchronous(SqliteSynchronous::Normal)
-        .busy_timeout(std::time::Duration::from_secs(10));
+        .busy_timeout(std::time::Duration::from_secs(30)); // 30s for slow NAS writes
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
@@ -65,6 +69,18 @@ pub async fn connect_library_sqlite(db_path: &Path) -> Result<Pool<Sqlite>> {
     .execute(&pool)
     .await;
 
+    // Backward compatibility migration for is_favorite
+    let _ = sqlx::query(
+        "ALTER TABLE assets ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0"
+    )
+    .execute(&pool)
+    .await;
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_assets_is_favorite ON assets(is_favorite)"
+    )
+    .execute(&pool)
+    .await;
+
     // Purge any existing Revit backup files from database
     if let Ok(assets) = sqlx::query_as::<_, (String, String)>(
         "SELECT id, file_name FROM assets WHERE extension IN ('rfa', 'rvt')"
@@ -98,9 +114,9 @@ impl Database {
         let master_options = SqliteConnectOptions::new()
             .filename(master_path)
             .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Wal)
+            .journal_mode(SqliteJournalMode::Delete) // consistent with library DBs
             .synchronous(SqliteSynchronous::Normal)
-            .busy_timeout(std::time::Duration::from_secs(10));
+            .busy_timeout(std::time::Duration::from_secs(30));
 
         let master_pool = SqlitePoolOptions::new()
             .max_connections(5)
@@ -125,6 +141,13 @@ impl Database {
 
         // Also ensure library schema tables exist on master_pool as fallback
         let _ = sqlx::query(include_str!("../migrations/002_library_schema.sql"))
+            .execute(&master_pool)
+            .await;
+
+        let _ = sqlx::query("ALTER TABLE assets ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0")
+            .execute(&master_pool)
+            .await;
+        let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_assets_is_favorite ON assets(is_favorite)")
             .execute(&master_pool)
             .await;
 

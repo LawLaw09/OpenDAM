@@ -1,10 +1,10 @@
 -- OpenDAM Per-Library SQLite Schema (stored in <library_root>/.opendam/library.sqlite)
 
-PRAGMA journal_mode=WAL;
+PRAGMA journal_mode=DELETE;
 PRAGMA synchronous=NORMAL;
 PRAGMA temp_store=MEMORY;
 PRAGMA cache_size=-64000;
-PRAGMA busy_timeout=10000;
+PRAGMA busy_timeout=30000;  -- 30s for slow NAS writes
 PRAGMA foreign_keys=OFF;
 
 -- ── Directory modification timestamps for smart incremental scans ────────
@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS assets (
     indexed_at       INTEGER NOT NULL,
     rating           INTEGER NOT NULL DEFAULT 0,
     color_label      TEXT NOT NULL DEFAULT 'none',
+    is_favorite      INTEGER NOT NULL DEFAULT 0,
     description      TEXT NOT NULL DEFAULT '',
     thumbnail_path   TEXT,                -- relative to library root (.opendam/thumbs/...)
     preview_status   TEXT NOT NULL DEFAULT 'none',
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS assets (
 CREATE INDEX IF NOT EXISTS idx_assets_kind         ON assets(kind);
 CREATE INDEX IF NOT EXISTS idx_assets_rating       ON assets(rating);
 CREATE INDEX IF NOT EXISTS idx_assets_color_label  ON assets(color_label);
+CREATE INDEX IF NOT EXISTS idx_assets_is_favorite  ON assets(is_favorite);
 CREATE INDEX IF NOT EXISTS idx_assets_modified_at  ON assets(modified_at);
 CREATE INDEX IF NOT EXISTS idx_assets_extension    ON assets(extension);
 

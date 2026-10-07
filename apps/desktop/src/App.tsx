@@ -101,6 +101,29 @@ export default function App() {
         }
       }
 
+      // Toggle favorite on focused/selected asset(s) with 'f' or 'F'
+      if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && !isEditingText()) {
+        const selectedIds = useUIStore.getState().selectedAssetIds;
+        const focusedId = useUIStore.getState().focusedAssetId;
+        const ids = selectedIds.size > 0 ? Array.from(selectedIds) : focusedId ? [focusedId] : [];
+        if (ids.length > 0) {
+          e.preventDefault();
+          const assetStore = useAssetStore.getState();
+          const firstAsset = assetStore.getById(ids[0]);
+          const newFav = !(firstAsset?.isFavorite ?? false);
+          for (const id of ids) {
+            assetStore.patchAsset(id, { isFavorite: newFav });
+          }
+          setCopyToast(
+            ids.length === 1
+              ? newFav ? 'Added to favorites' : 'Removed from favorites'
+              : newFav ? `Added ${ids.length} assets to favorites` : `Removed ${ids.length} assets from favorites`
+          );
+          if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+          toastTimeoutRef.current = window.setTimeout(() => setCopyToast(null), 2200);
+        }
+      }
+
       // Delete selected asset(s) with Delete or Backspace key
       if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditingText()) {
         const selectedIds = useUIStore.getState().selectedAssetIds;

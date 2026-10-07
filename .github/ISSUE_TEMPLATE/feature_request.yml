@@ -1,0 +1,33 @@
+name: 💡 Feature Request
+description: Propose a new feature, 3D format support, or enhancement for OpenDAM
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve OpenDAM!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Use Case
+      description: Is your feature request related to a problem or specific 3D/AEC workflow?
+      placeholder: e.g. "Our studio uses Unreal Engine / Cinema 4D and we need..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution / Feature
+      description: Describe what you would like to see happen and how it should work.
+      placeholder: Describe the solution in detail.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative Solutions Considered
+      description: Any alternative options or workarounds you've thought about.

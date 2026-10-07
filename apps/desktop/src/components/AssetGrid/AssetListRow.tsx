@@ -2,7 +2,8 @@ import { memo, useCallback } from 'react';
 import clsx from 'clsx';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { Asset } from '../../types';
-import { IconImage, IconVideo, IconStar } from '../Icons';
+import { useAssetStore } from '../../store';
+import { IconImage, IconVideo, IconStar, IconHeart, IconHeartFilled } from '../Icons';
 import styles from './AssetListRow.module.css';
 
 interface AssetListRowProps {
@@ -26,12 +27,22 @@ function formatDate(ms: number): string {
 export const AssetListRow = memo(function AssetListRow({
   asset, selected, onClick,
 }: AssetListRowProps) {
+  const patchAsset = useAssetStore((s) => s.patchAsset);
+
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
       onClick(asset, e);
     },
     [asset, onClick]
+  );
+
+  const handleToggleFavorite = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      patchAsset(asset.id, { isFavorite: !asset.isFavorite });
+    },
+    [asset.id, asset.isFavorite, patchAsset]
   );
 
   const handleDragStart = useCallback(
@@ -52,6 +63,22 @@ export const AssetListRow = memo(function AssetListRow({
       role="button"
       tabIndex={0}
     >
+      {/* Favorite Button */}
+      <button
+        id={`row-fav-${asset.id}`}
+        type="button"
+        className={clsx(styles.favoriteBtn, asset.isFavorite && styles.favoriteActive)}
+        onClick={handleToggleFavorite}
+        title={asset.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+        aria-label={asset.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+      >
+        {asset.isFavorite ? (
+          <IconHeartFilled size={14} className={styles.favoriteHeartFilled} />
+        ) : (
+          <IconHeart size={14} />
+        )}
+      </button>
+
       {/* Thumbnail */}
       <div className={styles.thumb}>
         {asset.thumbnailPath && !asset.thumbnailPath.endsWith('.glb') ? (

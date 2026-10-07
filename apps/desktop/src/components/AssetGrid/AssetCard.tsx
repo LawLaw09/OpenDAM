@@ -2,8 +2,8 @@ import { memo, useCallback, useState, useEffect, useMemo } from 'react';
 import clsx from 'clsx';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { Asset, AssetKind } from '../../types';
-import { useTagStore, useCollectionStore } from '../../store';
-import { IconModel3D, IconImage, IconVideo, IconStar, IconCollection } from '../Icons';
+import { useTagStore, useCollectionStore, useAssetStore } from '../../store';
+import { IconModel3D, IconImage, IconVideo, IconStar, IconCollection, IconHeart, IconHeartFilled } from '../Icons';
 import styles from './AssetCard.module.css';
 
 export interface AssetCardProps {
@@ -40,6 +40,7 @@ export const AssetCard = memo(function AssetCard({
   asset, selected, onClick,
 }: AssetCardProps) {
   const [imgError, setImgError] = useState(false);
+  const patchAsset = useAssetStore((s) => s.patchAsset);
 
   useEffect(() => {
     setImgError(false);
@@ -54,6 +55,14 @@ export const AssetCard = memo(function AssetCard({
       onClick(asset, e);
     },
     [asset, onClick]
+  );
+
+  const handleToggleFavorite = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      patchAsset(asset.id, { isFavorite: !asset.isFavorite });
+    },
+    [asset.id, asset.isFavorite, patchAsset]
   );
 
   const handleDragStart = useCallback(
@@ -163,6 +172,22 @@ export const AssetCard = memo(function AssetCard({
         {asset.previewStatus === 'error' && (
           <div className={clsx(styles.previewBadge, styles.error)}>!</div>
         )}
+
+        {/* Favorite toggle button */}
+        <button
+          id={`card-fav-${asset.id}`}
+          type="button"
+          className={clsx(styles.favoriteBtn, asset.isFavorite && styles.favoriteActive)}
+          onClick={handleToggleFavorite}
+          title={asset.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+          aria-label={asset.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+        >
+          {asset.isFavorite ? (
+            <IconHeartFilled size={13} className={styles.favoriteHeartFilled} />
+          ) : (
+            <IconHeart size={13} />
+          )}
+        </button>
 
         {/* Color label stripe */}
         {asset.colorLabel !== 'none' && (

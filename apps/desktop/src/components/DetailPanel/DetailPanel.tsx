@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import { useUIStore, useAssetStore, useTagStore, useCollectionStore } from '../../store';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { Asset, ColorLabel, Collection } from '../../types';
-import { IconStar, IconX, IconExternal, IconEye, IconInfo, IconCopy, IconCheck, IconRefresh, IconEdit, IconTrash } from '../Icons';
+import { IconStar, IconX, IconExternal, IconEye, IconInfo, IconCopy, IconCheck, IconRefresh, IconEdit, IconTrash, IconHeart, IconHeartFilled } from '../Icons';
 import { ConfirmDeleteDialog } from '../ConfirmDeleteDialog';
 import { api } from '../../api';
 import { ThreeViewer } from './ThreeViewer';
@@ -47,6 +47,11 @@ export function DetailPanel() {
 
   const setColorLabel = useCallback(
     (label: ColorLabel) => asset && patchAsset(asset.id, { colorLabel: label === asset.colorLabel ? 'none' : label }),
+    [asset, patchAsset]
+  );
+
+  const toggleFavorite = useCallback(
+    () => asset && patchAsset(asset.id, { isFavorite: !asset.isFavorite }),
     [asset, patchAsset]
   );
 
@@ -220,6 +225,18 @@ export function DetailPanel() {
 
         <div className={styles.headerActions}>
           <button
+            id="detail-favorite"
+            className={clsx(styles.actionBtn, asset.isFavorite && styles.actionBtnFavorite)}
+            title={asset.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+            onClick={toggleFavorite}
+          >
+            {asset.isFavorite ? (
+              <IconHeartFilled size={14} className={styles.favoriteHeartFilled} />
+            ) : (
+              <IconHeart size={14} />
+            )}
+          </button>
+          <button
             id="detail-rename"
             className={styles.actionBtn}
             title="Rename file (F2)"
@@ -305,7 +322,12 @@ export function DetailPanel() {
 
       <div className={styles.tabContent}>
         {tab === 'info' && (
-          <InfoTab asset={asset} onRatingChange={setRating} onColorLabelChange={setColorLabel} />
+          <InfoTab
+            asset={asset}
+            onRatingChange={setRating}
+            onColorLabelChange={setColorLabel}
+            onFavoriteChange={toggleFavorite}
+          />
         )}
         {tab === 'tags' && (
           <TagsTab asset={asset} tags={tags} onToggle={toggleTag} />
@@ -342,16 +364,39 @@ export function DetailPanel() {
 
 // ── Info Tab ──────────────────────────────────────────────────────────────
 function InfoTab({
-  asset, onRatingChange, onColorLabelChange,
+  asset, onRatingChange, onColorLabelChange, onFavoriteChange,
 }: {
   asset: Asset;
   onRatingChange: (r: number) => void;
   onColorLabelChange: (l: ColorLabel) => void;
+  onFavoriteChange: () => void;
 }) {
   const [hoverRating, setHoverRating] = useState(0);
 
   return (
     <div className={styles.infoGrid}>
+      {/* Favorite */}
+      <label className={styles.infoLabel}>Favorite</label>
+      <div className={styles.favoriteRow}>
+        <button
+          id="detail-info-favorite"
+          type="button"
+          className={clsx(styles.infoFavoriteBtn, asset.isFavorite && styles.infoFavoriteActive)}
+          onClick={onFavoriteChange}
+        >
+          {asset.isFavorite ? (
+            <>
+              <IconHeartFilled size={14} className={styles.favoriteHeartFilled} />
+              <span>In Favorites</span>
+            </>
+          ) : (
+            <>
+              <IconHeart size={14} />
+              <span>Add to Favorites</span>
+            </>
+          )}
+        </button>
+      </div>
       {/* Rating */}
       <label className={styles.infoLabel}>Rating</label>
       <div className={styles.starRow}>

@@ -9,42 +9,69 @@ use crate::db::{resolve_path, make_relative_path};
 
 type Result<T> = std::result::Result<T, String>;
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct RawAssetRow {
+    pub id: String,
+    pub file_path: String,
+    pub file_name: String,
+    pub extension: String,
+    pub kind: String,
+    pub size_bytes: i64,
+    pub modified_at: i64,
+    pub indexed_at: i64,
+    pub rating: i64,
+    pub color_label: String,
+    pub is_favorite: i64,
+    pub description: String,
+    pub thumbnail_path: Option<String>,
+    pub preview_status: String,
+    pub metadata: String,
+    pub tags: Option<String>,
+    pub collections: Option<String>,
+}
+
 /// Build an Asset from a raw SQLite row, resolving relative paths to absolute paths
-fn row_to_asset(
-    root: Option<&Path>,
-    id: String, file_path: String, file_name: String, extension: String,
-    kind: String, size_bytes: i64, modified_at: i64, indexed_at: i64,
-    rating: i64, color_label: String, description: String,
-    thumbnail_path: Option<String>, preview_status: String,
-    metadata_json: String, tags_json: Option<String>,
-    collections_json: Option<String>,
-) -> Asset {
+fn row_to_asset(root: Option<&Path>, row: RawAssetRow) -> Asset {
     let mut metadata: std::collections::HashMap<String, serde_json::Value> =
-        serde_json::from_str(&metadata_json).unwrap_or_default();
+        serde_json::from_str(&row.metadata).unwrap_or_default();
     if let (Some(r), Some(pm)) = (root, metadata.get("preview_model").and_then(|v| v.as_str())) {
         let abs_pm = resolve_path(r, pm);
         metadata.insert("preview_model".to_string(), serde_json::Value::String(abs_pm));
     }
-    let tags: Vec<String> = tags_json
+    let tags: Vec<String> = row.tags
         .and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default();
-    let collections: Vec<String> = collections_json
+    let collections: Vec<String> = row.collections
         .and_then(|j| serde_json::from_str(&j).ok())
         .unwrap_or_default();
 
     let resolved_file_path = match root {
-        Some(r) => resolve_path(r, &file_path),
-        None => file_path,
+        Some(r) => resolve_path(r, &row.file_path),
+        None => row.file_path,
     };
-    let resolved_thumb_path = match (root, thumbnail_path) {
+    let resolved_thumb_path = match (root, row.thumbnail_path) {
         (Some(r), Some(t)) => Some(resolve_path(r, &t)),
         (_, t) => t,
     };
 
     Asset {
-        id, file_path: resolved_file_path, file_name, extension, kind, size_bytes,
-        modified_at, indexed_at, rating, color_label, description,
-        tags, collections, thumbnail_path: resolved_thumb_path, preview_status, metadata,
+        id: row.id,
+        file_path: resolved_file_path,
+        file_name: row.file_name,
+        extension: row.extension,
+        kind: row.kind,
+        size_bytes: row.size_bytes,
+        modified_at: row.modified_at,
+        indexed_at: row.indexed_at,
+        rating: row.rating,
+        color_label: row.color_label,
+        is_favorite: row.is_favorite != 0,
+        description: row.description,
+        tags,
+        collections,
+        thumbnail_path: resolved_thumb_path,
+        preview_status: row.preview_status,
+        metadata,
     }
 }
 
@@ -122,6 +149,49 @@ pub async fn search_assets(
         conditions.push("a.rating >= ? AND a.rating <= ?".into());
         binds.push(rating.min.to_string());
         binds.push(rating.max.to_string());
+    }
+
+    if let Some(is_fav) = f.is_favorite {
+        if is_fav {
+            conditions.push("a.is_favorite = 1".into());
+        } else {
+            conditions.push("a.is_favorite = 0".into());
+        }
+    }
+
+    if let Some(dr) = &f.date_range {
+        if let Some(from) = dr.from {
+            conditions.push("a.modified_at >= ?".into());
+            binds.push(from.to_string());
+        }
+        if let Some(to) = dr.to {
+            conditions.push("a.modified_at <= ?".into());
+            binds.push(to.to_string());
+        }
+    }
+
+    if let Some(sr) = &f.size_range {
+        if let Some(min) = sr.min {
+            conditions.push("a.size_bytes >= ?".into());
+            binds.push(min.to_string());
+        }
+        if let Some(max) = sr.max {
+            conditions.push("a.size_bytes <= ?".into());
+            binds.push(max.to_string());
+        }
+    }
+
+    if let Some(ps) = &f.preview_status {
+        if !ps.is_empty() {
+            if ps == "missing" || ps == "needs_preview" {
+                conditions.push("a.preview_status IN ('none', 'error')".into());
+            } else if ps == "has_preview" {
+                conditions.push("a.preview_status = 'done'".into());
+            } else {
+                conditions.push("a.preview_status = ?".into());
+                binds.push(ps.clone());
+            }
+        }
     }
 
     if let Some(exts) = &f.extensions {
@@ -331,11 +401,12 @@ pub async fn search_assets(
     };
 
     let sort_col = match payload.query.sort.field.as_str() {
-        "name"   => "a.file_name",
-        "size"   => "a.size_bytes",
-        "rating" => "a.rating",
-        "kind"   => "a.kind",
-        _        => "a.modified_at",
+        "name"     => "a.file_name",
+        "size"     => "a.size_bytes",
+        "rating"   => "a.rating",
+        "kind"     => "a.kind",
+        "favorite" => "a.is_favorite",
+        _          => "a.modified_at",
     };
     let sort_dir = if payload.query.sort.order == "asc" { "ASC" } else { "DESC" };
 
@@ -347,7 +418,7 @@ pub async fn search_assets(
         r#"SELECT
             a.id, a.file_path, a.file_name, a.extension, a.kind,
             a.size_bytes, a.modified_at, a.indexed_at, a.rating,
-            a.color_label, a.description, a.thumbnail_path,
+            a.color_label, a.is_favorite, a.description, a.thumbnail_path,
             a.preview_status, a.metadata,
             (SELECT json_group_array(tag_id) FROM asset_tags WHERE asset_id = a.id) AS tags,
             (SELECT json_group_array(collection_id) FROM collection_assets WHERE asset_id = a.id) AS collections
@@ -367,14 +438,7 @@ pub async fn search_assets(
         }
         let total = count_query.fetch_one(pool).await.map_err(|e| e.to_string())?;
 
-        let mut data_query = sqlx::query_as::<_, (
-            String, String, String, String, String,
-            i64, i64, i64, i64,
-            String, String, Option<String>,
-            String, String,
-            Option<String>,
-            Option<String>,
-        )>(&data_sql);
+        let mut data_query = sqlx::query_as::<_, RawAssetRow>(&data_sql);
         for b in &binds {
             data_query = data_query.bind(b.clone());
         }
@@ -384,9 +448,7 @@ pub async fn search_assets(
         let root_ref = root_opt.as_deref();
         let assets = rows
             .into_iter()
-            .map(|(id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols)| {
-                row_to_asset(root_ref, id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols)
-            })
+            .map(|r| row_to_asset(root_ref, r))
             .collect();
 
         return Ok(SearchResult {
@@ -403,7 +465,7 @@ pub async fn search_assets(
         r#"SELECT
             a.id, a.file_path, a.file_name, a.extension, a.kind,
             a.size_bytes, a.modified_at, a.indexed_at, a.rating,
-            a.color_label, a.description, a.thumbnail_path,
+            a.color_label, a.is_favorite, a.description, a.thumbnail_path,
             a.preview_status, a.metadata,
             (SELECT json_group_array(tag_id) FROM asset_tags WHERE asset_id = a.id) AS tags,
             (SELECT json_group_array(collection_id) FROM collection_assets WHERE asset_id = a.id) AS collections
@@ -426,14 +488,7 @@ pub async fn search_assets(
             total += c;
         }
 
-        let mut data_query = sqlx::query_as::<_, (
-            String, String, String, String, String,
-            i64, i64, i64, i64,
-            String, String, Option<String>,
-            String, String,
-            Option<String>,
-            Option<String>,
-        )>(&multi_data_sql);
+        let mut data_query = sqlx::query_as::<_, RawAssetRow>(&multi_data_sql);
         for b in &binds {
             data_query = data_query.bind(b.clone());
         }
@@ -441,8 +496,8 @@ pub async fn search_assets(
 
         if let Ok(rows) = data_query.fetch_all(pool).await {
             let root_ref = root_opt.as_deref();
-            for (id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols) in rows {
-                all_assets.push(row_to_asset(root_ref, id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols));
+            for r in rows {
+                all_assets.push(row_to_asset(root_ref, r));
             }
         }
     }
@@ -451,11 +506,12 @@ pub async fn search_assets(
     let is_asc = payload.query.sort.order == "asc";
     all_assets.sort_by(|a, b| {
         let cmp = match sort_field {
-            "name"   => a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()),
-            "size"   => a.size_bytes.cmp(&b.size_bytes),
-            "rating" => a.rating.cmp(&b.rating),
-            "kind"   => a.kind.cmp(&b.kind),
-            _        => a.modified_at.cmp(&b.modified_at),
+            "name"     => a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()),
+            "size"     => a.size_bytes.cmp(&b.size_bytes),
+            "rating"   => a.rating.cmp(&b.rating),
+            "kind"     => a.kind.cmp(&b.kind),
+            "favorite" => a.is_favorite.cmp(&b.is_favorite),
+            _          => a.modified_at.cmp(&b.modified_at),
         };
         if is_asc { cmp } else { cmp.reverse() }
     });
@@ -483,17 +539,10 @@ pub async fn get_asset(
 
     // Search across open libraries
     for lib in libs {
-        let row = sqlx::query_as::<_, (
-            String, String, String, String, String,
-            i64, i64, i64, i64,
-            String, String, Option<String>,
-            String, String,
-            Option<String>,
-            Option<String>,
-        )>(
+        let row = sqlx::query_as::<_, RawAssetRow>(
             r#"SELECT a.id, a.file_path, a.file_name, a.extension, a.kind,
                a.size_bytes, a.modified_at, a.indexed_at, a.rating,
-               a.color_label, a.description, a.thumbnail_path,
+               a.color_label, a.is_favorite, a.description, a.thumbnail_path,
                a.preview_status, a.metadata,
                (SELECT json_group_array(tag_id) FROM asset_tags WHERE asset_id = a.id) AS tags,
                (SELECT json_group_array(collection_id) FROM collection_assets WHERE asset_id = a.id) AS collections
@@ -504,24 +553,17 @@ pub async fn get_asset(
         .await
         .map_err(|e| e.to_string())?;
 
-        if let Some((id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols)) = row {
-            return Ok(row_to_asset(Some(&lib.root_path), id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols));
+        if let Some(r) = row {
+            return Ok(row_to_asset(Some(&lib.root_path), r));
         }
     }
 
     // Fallback to active/default pool
     let fallback_pool = state.db.get_active_pool().await;
-    let row = sqlx::query_as::<_, (
-        String, String, String, String, String,
-        i64, i64, i64, i64,
-        String, String, Option<String>,
-        String, String,
-        Option<String>,
-        Option<String>,
-    )>(
+    let row = sqlx::query_as::<_, RawAssetRow>(
         r#"SELECT a.id, a.file_path, a.file_name, a.extension, a.kind,
            a.size_bytes, a.modified_at, a.indexed_at, a.rating,
-           a.color_label, a.description, a.thumbnail_path,
+           a.color_label, a.is_favorite, a.description, a.thumbnail_path,
            a.preview_status, a.metadata,
            (SELECT json_group_array(tag_id) FROM asset_tags WHERE asset_id = a.id) AS tags,
            (SELECT json_group_array(collection_id) FROM collection_assets WHERE asset_id = a.id) AS collections
@@ -533,9 +575,9 @@ pub async fn get_asset(
     .map_err(|e| e.to_string())?;
 
     match row {
-        Some((id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols)) => {
+        Some(r) => {
             let root_opt = state.db.get_library_root(None).await;
-            Ok(row_to_asset(root_opt.as_deref(), id, fp, fn_, ext, kind, sb, ma, ia, r, cl, desc, tp, ps, meta, tags, cols))
+            Ok(row_to_asset(root_opt.as_deref(), r))
         }
         None => Err(format!("Asset not found: {}", id)),
     }
@@ -583,6 +625,11 @@ pub async fn update_asset(
         if let Some(ref color_label) = patch.color_label {
             let _ = sqlx::query("UPDATE assets SET color_label = ? WHERE id = ?")
                 .bind(color_label).bind(&id).execute(pool).await;
+        }
+        if let Some(is_fav) = patch.is_favorite {
+            let fav_int: i64 = if is_fav { 1 } else { 0 };
+            let _ = sqlx::query("UPDATE assets SET is_favorite = ? WHERE id = ?")
+                .bind(fav_int).bind(&id).execute(pool).await;
         }
         if let Some(ref description) = patch.description {
             let _ = sqlx::query("UPDATE assets SET description = ? WHERE id = ?")

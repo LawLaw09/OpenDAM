@@ -30,7 +30,7 @@ thiserror = "1"
 walkdir = "2"
 mime_guess = "2"
 chrono = { version = "0.4", features = ["serde"] }
-image = { version = "0.25", features = ["jpeg", "png", "tiff", "bmp", "gif"] }
+image = { version = "0.25", features = ["jpeg", "png", "tiff", "bmp", "gif", "tga", "webp"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dirs = "5"

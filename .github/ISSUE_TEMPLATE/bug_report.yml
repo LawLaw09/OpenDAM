@@ -1,0 +1,58 @@
+name: 🐛 Bug Report
+description: Report an issue or bug with OpenDAM
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please search existing issues first to avoid duplicates.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the Bug
+      description: A clear and concise description of what the bug is.
+      placeholder: What happened? What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the behavior.
+      placeholder: |
+        1. Open OpenDAM
+        2. Add a library containing format .xyz
+        3. Click on ...
+        4. See error
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows 11
+        - Windows 10
+        - Windows Server
+        - macOS
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: file_formats
+    attributes:
+      label: Affected File Formats (if applicable)
+      description: e.g. .max, .rvt, .skp, .fbx, .vrmat, .exr
+      placeholder: ".max, .rvt"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Terminal Output
+      description: Please paste any error messages or logs from terminal or devtools.
+      render: shell

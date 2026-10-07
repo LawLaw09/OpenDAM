@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useTagStore, useCollectionStore } from '../../store';
 import type { FilterSpec, ColorLabel, Collection } from '../../types';
-import { IconFilter, IconX, IconStar, IconFolder, IconCheck, IconCollection } from '../Icons';
+import { IconFilter, IconX, IconStar, IconFolder, IconCheck, IconCollection, IconHeartFilled } from '../Icons';
 import styles from './SmartFilterModal.module.css';
 
 interface SmartFilterModalProps {
@@ -38,6 +38,7 @@ export function SmartFilterModal({ isOpen, onClose, onCreated }: SmartFilterModa
   const [customExt, setCustomExt] = useState('');
   const [ratingMin, setRatingMin] = useState<number>(0);
   const [selectedColor, setSelectedColor] = useState<ColorLabel | null>(null);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
 
   // Tag filter state: 'any' | 'none' (untagged) | 'specific'
   const [tagMode, setTagMode] = useState<'any' | 'none' | 'specific'>('any');
@@ -150,6 +151,9 @@ export function SmartFilterModal({ isOpen, onClose, onCreated }: SmartFilterModa
       if (selectedColor) {
         filterSpec.colorLabels = [selectedColor];
       }
+      if (favoritesOnly) {
+        filterSpec.isFavorite = true;
+      }
 
       // Tag filter logic
       if (tagMode === 'none') {
@@ -184,6 +188,7 @@ export function SmartFilterModal({ isOpen, onClose, onCreated }: SmartFilterModa
       setSelectedExtensions([]);
       setRatingMin(0);
       setSelectedColor(null);
+      setFavoritesOnly(false);
       setTagMode('any');
       setSelectedTags([]);
       setCollectionMode('any');
@@ -384,6 +389,34 @@ export function SmartFilterModal({ isOpen, onClose, onCreated }: SmartFilterModa
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Favorites Only toggle */}
+            <div className={styles.field}>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  color: favoritesOnly ? 'hsl(350 89% 65%)' : 'var(--color-text-secondary)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={favoritesOnly}
+                  onChange={(e) => setFavoritesOnly(e.target.checked)}
+                  style={{ accentColor: 'hsl(350 89% 60%)', cursor: 'pointer' }}
+                />
+                <IconHeartFilled
+                  size={15}
+                  style={{ color: favoritesOnly ? 'hsl(350 89% 60%)' : 'var(--color-text-muted)' }}
+                />
+                <span>Favorites Only (matches starred / favorited items)</span>
+              </label>
             </div>
 
             {/* ── TAG FILTER SECTION (Any / No-Tag / Specific Tags with AND/OR) ── */}

@@ -20,10 +20,8 @@ Phase 2 will add:
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 
@@ -53,10 +51,14 @@ def video_thumb(source: str, output: str, timestamp: str = "00:00:01") -> dict:
         result = subprocess.run(
             [
                 "ffmpeg",
-                "-ss", timestamp,
-                "-i", source,
-                "-frames:v", "1",
-                "-vf", "scale=720:720:force_original_aspect_ratio=decrease",
+                "-ss",
+                timestamp,
+                "-i",
+                source,
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=720:720:force_original_aspect_ratio=decrease",
                 "-y",
                 output,
             ],
@@ -82,7 +84,7 @@ def model_meta(source: str, output_dir: str) -> dict:
     stat = p.stat()
     ext = p.suffix.lower()
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    
+
     meta = {
         "size_bytes": stat.st_size,
         "extension": ext,
@@ -90,65 +92,79 @@ def model_meta(source: str, output_dir: str) -> dict:
         "object_count": None,
         "dimensions": None,
     }
-    
+
     res = {"ok": True, "metadata": meta}
-    
+
     if ext == ".max":
         # Extract embedded thumbnail from 3ds Max OLE storage
         try:
-            import olefile
-            import struct
             import io
+            import struct
+
+            import olefile
             from PIL import Image, ImageFilter
-            
+
             if olefile.isOleFile(source):
                 with olefile.OleFileIO(source) as ole:
-                    if '\x05SummaryInformation' in [s[0] for s in ole.listdir()]:
-                        props = ole.getproperties('\x05SummaryInformation')
+                    if "\x05SummaryInformation" in [s[0] for s in ole.listdir()]:
+                        props = ole.getproperties("\x05SummaryInformation")
                         thumb_data = props.get(17)
                         if thumb_data:
-                            idx = thumb_data.find(b'\x28\x00\x00\x00')
+                            idx = thumb_data.find(b"\x28\x00\x00\x00")
                             if idx != -1:
                                 dib = thumb_data[idx:]
-                                biWidth, biHeight = struct.unpack_from('<II', dib, 4)
-                                biBitCount = struct.unpack_from('<H', dib, 14)[0]
+                                biWidth, biHeight = struct.unpack_from("<II", dib, 4)
+                                biBitCount = struct.unpack_from("<H", dib, 14)[0]
                                 colors = 1 << biBitCount if biBitCount <= 8 else 0
                                 bfOffBits = 14 + 40 + (colors * 4)
                                 bfSize = 14 + len(dib)
-                                bmp_header = struct.pack('<2sIHHI', b'BM', bfSize, 0, 0, bfOffBits)
+                                bmp_header = struct.pack("<2sIHHI", b"BM", bfSize, 0, 0, bfOffBits)
                                 img = Image.open(io.BytesIO(bmp_header + dib))
                                 w, h = img.size
                                 if max(w, h) < 600:
                                     scale = max(1, int(1024 / max(w, h)))
                                     img = img.resize((w * scale, h * scale), Image.LANCZOS)
-                                    if img.mode != 'RGB':
-                                        img = img.convert('RGB')
-                                    img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=120, threshold=2))
-                                elif img.mode != 'RGB':
-                                    img = img.convert('RGB')
+                                    if img.mode != "RGB":
+                                        img = img.convert("RGB")
+                                    img = img.filter(
+                                        ImageFilter.UnsharpMask(
+                                            radius=1.2, percent=120, threshold=2
+                                        )
+                                    )
+                                elif img.mode != "RGB":
+                                    img = img.convert("RGB")
                                 out_path = Path(output_dir) / f"{p.stem}_thumb.png"
                                 img.save(out_path, format="PNG")
                                 res["thumbnail"] = str(out_path)
         except Exception as e:
             res["preview_error"] = f"Max extract failed: {e}"
-            
+
     elif ext == ".skp":
-        # Extract embedded thumbnail from SketchUp archive (zip for v2021+, binary for classic v3-v2020)
+        # Extract embedded thumbnail from SketchUp archive
+        # (zip for v2021+, binary for classic v3-v2020)
         try:
-            import zipfile
             import io
+            import zipfile
+
             from PIL import Image, ImageFilter
+
             if zipfile.is_zipfile(source):
-                with zipfile.ZipFile(source, 'r') as z:
+                with zipfile.ZipFile(source, "r") as z:
                     names = z.namelist()
                     thumb_name = None
-                    for candidate in ['meta/model_thumbnail.png', 'meta/preview_thumbnail.png', 'thumbnails/thumbnail.png']:
+                    for candidate in [
+                        "meta/model_thumbnail.png",
+                        "meta/preview_thumbnail.png",
+                        "thumbnails/thumbnail.png",
+                    ]:
                         if candidate in names:
                             thumb_name = candidate
                             break
                     if not thumb_name:
                         for name in names:
-                            if 'thumb' in name.lower() and (name.endswith('.png') or name.endswith('.jpg')):
+                            if "thumb" in name.lower() and (
+                                name.endswith(".png") or name.endswith(".jpg")
+                            ):
                                 thumb_name = name
                                 break
                     if thumb_name:
@@ -159,11 +175,13 @@ def model_meta(source: str, output_dir: str) -> dict:
                             if max(w, h) < 600:
                                 scale = max(1, int(1024 / max(w, h)))
                                 img = img.resize((w * scale, h * scale), Image.LANCZOS)
-                                if img.mode != 'RGB':
-                                    img = img.convert('RGB')
-                                img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=120, threshold=2))
-                            elif img.mode != 'RGB':
-                                img = img.convert('RGB')
+                                if img.mode != "RGB":
+                                    img = img.convert("RGB")
+                                img = img.filter(
+                                    ImageFilter.UnsharpMask(radius=1.2, percent=120, threshold=2)
+                                )
+                            elif img.mode != "RGB":
+                                img = img.convert("RGB")
                             out_path = Path(output_dir) / f"{p.stem}_thumb.png"
                             img.save(out_path, format="PNG")
                             res["thumbnail"] = str(out_path)
@@ -171,7 +189,7 @@ def model_meta(source: str, output_dir: str) -> dict:
                             out_path = Path(output_dir) / f"{p.stem}_thumb.png"
                             out_path.write_bytes(data)
                             res["thumbnail"] = str(out_path)
-            
+
             # Classic SketchUp binary models (v3 through v2020) embed a PNG thumbnail in the header
             if "thumbnail" not in res:
                 with open(source, "rb") as f:
@@ -184,11 +202,13 @@ def model_meta(source: str, output_dir: str) -> dict:
                         if max(w, h) < 600:
                             scale = max(1, int(1024 / max(w, h)))
                             img = img.resize((w * scale, h * scale), Image.LANCZOS)
-                            if img.mode != 'RGB':
-                                img = img.convert('RGB')
-                            img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=120, threshold=2))
-                        elif img.mode != 'RGB':
-                            img = img.convert('RGB')
+                            if img.mode != "RGB":
+                                img = img.convert("RGB")
+                            img = img.filter(
+                                ImageFilter.UnsharpMask(radius=1.2, percent=120, threshold=2)
+                            )
+                        elif img.mode != "RGB":
+                            img = img.convert("RGB")
                         out_path = Path(output_dir) / f"{p.stem}_thumb.png"
                         img.save(out_path, format="PNG")
                         res["thumbnail"] = str(out_path)
@@ -200,14 +220,16 @@ def model_meta(source: str, output_dir: str) -> dict:
     elif ext in [".rfa", ".rvt"]:
         # Extract embedded thumbnail from Revit OLE stream
         try:
-            import olefile
             import io
+
+            import olefile
             from PIL import Image, ImageFilter
+
             if olefile.isOleFile(source):
                 with olefile.OleFileIO(source) as ole:
-                    if ole.exists('RevitPreview4.0'):
-                        stream = ole.openstream('RevitPreview4.0').read()
-                        png_idx = stream.find(b'\x89PNG')
+                    if ole.exists("RevitPreview4.0"):
+                        stream = ole.openstream("RevitPreview4.0").read()
+                        png_idx = stream.find(b"\x89PNG")
                         if png_idx != -1:
                             try:
                                 img = Image.open(io.BytesIO(stream[png_idx:]))
@@ -215,11 +237,15 @@ def model_meta(source: str, output_dir: str) -> dict:
                                 if max(w, h) < 600:
                                     scale = max(1, int(1024 / max(w, h)))
                                     img = img.resize((w * scale, h * scale), Image.LANCZOS)
-                                    if img.mode != 'RGB':
-                                        img = img.convert('RGB')
-                                    img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=120, threshold=2))
-                                elif img.mode != 'RGB':
-                                    img = img.convert('RGB')
+                                    if img.mode != "RGB":
+                                        img = img.convert("RGB")
+                                    img = img.filter(
+                                        ImageFilter.UnsharpMask(
+                                            radius=1.2, percent=120, threshold=2
+                                        )
+                                    )
+                                elif img.mode != "RGB":
+                                    img = img.convert("RGB")
                                 out_path = Path(output_dir) / f"{p.stem}_thumb.png"
                                 img.save(out_path, format="PNG")
                                 res["thumbnail"] = str(out_path)
@@ -234,12 +260,13 @@ def model_meta(source: str, output_dir: str) -> dict:
         # Convert to GLB and generate snapshot PNG via Trimesh
         try:
             import trimesh
-            scene = trimesh.load(source, force='scene')
-            
+
+            scene = trimesh.load(source, force="scene")
+
             out_path = Path(output_dir) / f"{p.stem}_preview.glb"
-            scene.export(str(out_path), file_type='glb')
+            scene.export(str(out_path), file_type="glb")
             res["preview_model"] = str(out_path)
-            
+
             try:
                 png = scene.save_image(resolution=(1024, 1024))
                 if png:
@@ -248,8 +275,10 @@ def model_meta(source: str, output_dir: str) -> dict:
                     res["thumbnail"] = str(thumb_path)
             except Exception:
                 pass
-            
-            meta["poly_count"] = sum(len(g.faces) for g in scene.geometry.values() if hasattr(g, 'faces'))
+
+            meta["poly_count"] = sum(
+                len(g.faces) for g in scene.geometry.values() if hasattr(g, "faces")
+            )
             meta["object_count"] = len(scene.geometry)
         except Exception as e:
             res["preview_error"] = f"3D convert failed: {e}"
@@ -258,10 +287,12 @@ def model_meta(source: str, output_dir: str) -> dict:
         # Convert FBX/3DS via assimp_py and generate GLB + snapshot PNG
         try:
             import assimp_py
-            import trimesh
             import numpy as np
-            
-            ai_scene = assimp_py.import_file(source, assimp_py.Process_Triangulate | assimp_py.Process_GenNormals)
+            import trimesh
+
+            ai_scene = assimp_py.import_file(
+                source, assimp_py.Process_Triangulate | assimp_py.Process_GenNormals
+            )
             meshes = []
             poly_count = 0
             for m in ai_scene.meshes:
@@ -270,13 +301,13 @@ def model_meta(source: str, output_dir: str) -> dict:
                 if len(v) > 0 and len(f) > 0:
                     meshes.append(trimesh.Trimesh(vertices=v, faces=f))
                     poly_count += len(f)
-            
+
             if meshes:
                 t_scene = trimesh.Scene(meshes)
                 out_path = Path(output_dir) / f"{p.stem}_preview.glb"
-                t_scene.export(str(out_path), file_type='glb')
+                t_scene.export(str(out_path), file_type="glb")
                 res["preview_model"] = str(out_path)
-                
+
                 try:
                     png = t_scene.save_image(resolution=(1024, 1024))
                     if png:
@@ -285,7 +316,7 @@ def model_meta(source: str, output_dir: str) -> dict:
                         res["thumbnail"] = str(thumb_path)
                 except Exception:
                     pass
-                
+
                 meta["poly_count"] = poly_count
                 meta["object_count"] = len(meshes)
             else:
@@ -293,16 +324,16 @@ def model_meta(source: str, output_dir: str) -> dict:
         except Exception as e:
             res["preview_error"] = f"FBX/3DS convert failed: {e}"
 
-
     elif ext == ".vrmat":
         # V-Ray Material file preview
         try:
-            import re
             import base64
-            import xml.etree.ElementTree as ET
             import io
+            import re
+            import xml.etree.ElementTree as ET
+
             from PIL import Image, ImageDraw, ImageFilter
-            
+
             raw_text = p.read_text(encoding="utf-8", errors="ignore")
             thumb_saved = False
             out_path = Path(output_dir) / f"{p.stem}_thumb.jpg"
@@ -348,16 +379,22 @@ def model_meta(source: str, output_dir: str) -> dict:
             # 2. Check dedicated preview folders (e.g. Previews/Laminate_01.png)
             if not thumb_saved:
                 preview_dirs = [
-                    p.parent / "Previews", p.parent / "previews",
-                    p.parent / "Preview", p.parent / "preview",
-                    p.parent / "Renders", p.parent / "renders",
-                    p.parent.parent / "Previews", p.parent.parent / "previews",
+                    p.parent / "Previews",
+                    p.parent / "previews",
+                    p.parent / "Preview",
+                    p.parent / "preview",
+                    p.parent / "Renders",
+                    p.parent / "renders",
+                    p.parent.parent / "Previews",
+                    p.parent.parent / "previews",
                 ]
                 for pdir in preview_dirs:
                     if pdir.exists() and pdir.is_dir():
                         valid_imgs = [
-                            f for f in pdir.iterdir()
-                            if f.is_file() and f.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]
+                            f
+                            for f in pdir.iterdir()
+                            if f.is_file()
+                            and f.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]
                         ]
                         if valid_imgs:
                             stem_lower = p.stem.lower()
@@ -373,7 +410,7 @@ def model_meta(source: str, output_dir: str) -> dict:
 
             # 3. Embedded base64 preview inside VRMAT XML
             if not thumb_saved:
-                m = re.search(r'<preview[^>]*>(.+?)</preview>', raw_text, re.DOTALL | re.IGNORECASE)
+                m = re.search(r"<preview[^>]*>(.+?)</preview>", raw_text, re.DOTALL | re.IGNORECASE)
                 if m:
                     b64_str = m.group(1).strip()
                     if len(b64_str) > 100:
@@ -384,7 +421,8 @@ def model_meta(source: str, output_dir: str) -> dict:
                         except Exception:
                             pass
 
-            # 4. Check referenced textures in XML (Strictly prioritize Diffuse/Color over Normal/Bump/Gloss/Mask)
+            # 4. Check referenced textures in XML
+            # (Strictly prioritize Diffuse/Color over Normal/Bump/Gloss/Mask)
             if not thumb_saved:
                 try:
                     root = ET.fromstring(raw_text)
@@ -393,9 +431,25 @@ def model_meta(source: str, output_dir: str) -> dict:
                     for param in root.findall(".//parameter"):
                         pname = (param.get("name") or "").lower()
                         plabel = (param.get("label") or "").lower()
-                        if pname in ["file", "bitmap", "filename"] or "texture" in pname or "color" in pname:
+                        if (
+                            pname in ["file", "bitmap", "filename"]
+                            or "texture" in pname
+                            or "color" in pname
+                        ):
                             for val in param.findall(".//value"):
-                                if val.text and any(val.text.lower().endswith(im_ext) for im_ext in [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".tga", ".bmp", ".webp"]):
+                                if val.text and any(
+                                    val.text.lower().endswith(im_ext)
+                                    for im_ext in [
+                                        ".jpg",
+                                        ".jpeg",
+                                        ".png",
+                                        ".tif",
+                                        ".tiff",
+                                        ".tga",
+                                        ".bmp",
+                                        ".webp",
+                                    ]
+                                ):
                                     tex_name = Path(val.text.strip()).name
                                     search_paths = [
                                         p.parent / tex_name,
@@ -408,9 +462,22 @@ def model_meta(source: str, output_dir: str) -> dict:
                                         if sp.exists() and sp.is_file():
                                             tex_lower = tex_name.lower()
                                             score = 10
-                                            if any(k in tex_lower for k in ["diff", "alb", "base", "color", "col", "tex"]):
+                                            if any(
+                                                k in tex_lower
+                                                for k in [
+                                                    "diff",
+                                                    "alb",
+                                                    "base",
+                                                    "color",
+                                                    "col",
+                                                    "tex",
+                                                ]
+                                            ):
                                                 score += 60
-                                            if any(k in pname or k in plabel for k in ["diffuse", "albedo", "color", "base"]):
+                                            if any(
+                                                k in pname or k in plabel
+                                                for k in ["diffuse", "albedo", "color", "base"]
+                                            ):
                                                 score += 50
                                             if any(k in tex_lower for k in ["norm", "nrm"]):
                                                 score -= 100
@@ -445,7 +512,11 @@ def model_meta(source: str, output_dir: str) -> dict:
             if not thumb_saved:
                 sphere_color = (80, 110, 160)
                 try:
-                    color_matches = re.findall(r'<parameter[^>]*name=["\'](?:color|diffuse|diffuse_color|base_color)["\'][^>]*>.*?<r>([0-9.]+)</r>.*?<g>([0-9.]+)</g>.*?<b>([0-9.]+)</b>', raw_text, re.DOTALL | re.IGNORECASE)
+                    color_matches = re.findall(
+                        r'<parameter[^>]*name=["\'](?:color|diffuse|diffuse_color|base_color)["\'][^>]*>.*?<r>([0-9.]+)</r>.*?<g>([0-9.]+)</g>.*?<b>([0-9.]+)</b>',
+                        raw_text,
+                        re.DOTALL | re.IGNORECASE,
+                    )
                     if color_matches:
                         r, g, b = [float(x) for x in color_matches[0]]
                         sphere_color = (
@@ -466,12 +537,15 @@ def model_meta(source: str, output_dir: str) -> dict:
                 sr, sg, sb = sphere_color
                 for r_step in range(radius, 0, -2):
                     frac = 1.0 - (r_step / float(radius))
-                    cr = min(255, int(sr * 0.45 + (255 - sr * 0.45) * (frac ** 2.2)))
-                    cg = min(255, int(sg * 0.45 + (255 - sg * 0.45) * (frac ** 2.2)))
-                    cb = min(255, int(sb * 0.45 + (255 - sb * 0.45) * (frac ** 2.2)))
-                    step_cx = int(cx + (light_x - cx) * (frac ** 0.8))
-                    step_cy = int(cy + (light_y - cy) * (frac ** 0.8))
-                    draw.ellipse([step_cx - r_step, step_cy - r_step, step_cx + r_step, step_cy + r_step], fill=(cr, cg, cb))
+                    cr = min(255, int(sr * 0.45 + (255 - sr * 0.45) * (frac**2.2)))
+                    cg = min(255, int(sg * 0.45 + (255 - sg * 0.45) * (frac**2.2)))
+                    cb = min(255, int(sb * 0.45 + (255 - sb * 0.45) * (frac**2.2)))
+                    step_cx = int(cx + (light_x - cx) * (frac**0.8))
+                    step_cy = int(cy + (light_y - cy) * (frac**0.8))
+                    draw.ellipse(
+                        [step_cx - r_step, step_cy - r_step, step_cx + r_step, step_cy + r_step],
+                        fill=(cr, cg, cb),
+                    )
 
                 swatch = swatch.filter(ImageFilter.SMOOTH)
                 swatch.save(out_path, format="JPEG", quality=95)
@@ -482,11 +556,11 @@ def model_meta(source: str, output_dir: str) -> dict:
     elif ext == ".3dm":
         # Rhino 3DM preview (Meshes -> GLB + PNG, or CAD curve vector blueprint)
         try:
-            import rhino3dm
-            from PIL import Image, ImageDraw
-            import trimesh
             import numpy as np
-            
+            import rhino3dm
+            import trimesh
+            from PIL import Image, ImageDraw
+
             doc = rhino3dm.File3dm.Read(source)
             if not doc:
                 res["preview_error"] = "Failed to parse 3DM archive"
@@ -521,7 +595,7 @@ def model_meta(source: str, output_dir: str) -> dict:
                 if t_meshes:
                     t_scene = trimesh.Scene(t_meshes)
                     out_glb = Path(output_dir) / f"{p.stem}_preview.glb"
-                    t_scene.export(str(out_glb), file_type='glb')
+                    t_scene.export(str(out_glb), file_type="glb")
                     res["preview_model"] = str(out_glb)
                     try:
                         png = t_scene.save_image(resolution=(1024, 1024))
@@ -542,14 +616,16 @@ def model_meta(source: str, output_dir: str) -> dict:
                         if isinstance(geo, rhino3dm.Curve):
                             t0, t1 = geo.Domain.T0, geo.Domain.T1
                             n_pts = 2 if isinstance(geo, rhino3dm.LineCurve) else 16
-                            pts = [geo.PointAt(t0 + (t1 - t0) * s / (n_pts - 1)) for s in range(n_pts)]
+                            pts = [
+                                geo.PointAt(t0 + (t1 - t0) * s / (n_pts - 1)) for s in range(n_pts)
+                            ]
                             lines.append([(pt.X, pt.Y) for pt in pts])
                         elif isinstance(geo, rhino3dm.Polyline):
                             lines.append([(pt.X, pt.Y) for pt in geo])
 
                     if lines:
                         size = 1024
-                        img = Image.new('RGB', (size, size), (22, 24, 30))
+                        img = Image.new("RGB", (size, size), (22, 24, 30))
                         draw = ImageDraw.Draw(img)
                         bw = bbox.Max.X - bbox.Min.X
                         bh = bbox.Max.Y - bbox.Min.Y
@@ -557,7 +633,10 @@ def model_meta(source: str, output_dir: str) -> dict:
                         cx = (bbox.Min.X + bbox.Max.X) / 2
                         cy = (bbox.Min.Y + bbox.Max.Y) / 2
                         for poly in lines:
-                            s_pts = [(int(size/2 + (x - cx)*scale), int(size/2 - (y - cy)*scale)) for x, y in poly]
+                            s_pts = [
+                                (int(size / 2 + (x - cx) * scale), int(size / 2 - (y - cy) * scale))
+                                for x, y in poly
+                            ]
                             if len(s_pts) > 1:
                                 draw.line(s_pts, fill=(100, 180, 255), width=3)
                         out_thumb = Path(output_dir) / f"{p.stem}_thumb.png"
@@ -574,40 +653,81 @@ def model_meta(source: str, output_dir: str) -> dict:
         try:
             import io
             import struct
+
             from PIL import Image, ImageFilter
 
             # Read up to first 8MB (DWG thumbnail is in the header / preview block)
             with open(source, "rb") as f:
                 data = f.read(8 * 1024 * 1024)
 
-            sentinel = bytes([0x1F, 0x25, 0x6D, 0x07, 0xD4, 0x36, 0x28, 0x28, 0x9D, 0x57, 0xCA, 0x3F, 0x9D, 0x44, 0x10, 0x2B])
+            sentinel = bytes(
+                [
+                    0x1F,
+                    0x25,
+                    0x6D,
+                    0x07,
+                    0xD4,
+                    0x36,
+                    0x28,
+                    0x28,
+                    0x9D,
+                    0x57,
+                    0xCA,
+                    0x3F,
+                    0x9D,
+                    0x44,
+                    0x10,
+                    0x2B,
+                ]
+            )
             idx = data.find(sentinel)
             thumb_extracted = False
 
             if idx != -1:
-                block = data[idx + 16:]
+                block = data[idx + 16 :]
                 if len(block) >= 5:
-                    total_len, num_images = struct.unpack_from('<IB', block, 0)
+                    total_len, num_images = struct.unpack_from("<IB", block, 0)
                     pos = 5
                     for _ in range(min(num_images, 16)):
                         if pos + 9 > len(block):
                             break
-                        type_code, offset, length = struct.unpack_from('<BII', block, pos)
+                        type_code, offset, length = struct.unpack_from("<BII", block, pos)
                         pos += 9
                         if offset > 0 and length > 0 and offset + length <= len(data):
-                            img_bytes = data[offset:offset + length]
+                            img_bytes = data[offset : offset + length]
                             try:
                                 img = None
-                                if img_bytes.startswith(b'\x89PNG'):
+                                if img_bytes.startswith(b"\x89PNG"):
                                     img = Image.open(io.BytesIO(img_bytes))
-                                elif img_bytes.startswith(b'BM'):
+                                elif img_bytes.startswith(b"BM"):
                                     img = Image.open(io.BytesIO(img_bytes))
-                                elif len(img_bytes) > 40 and struct.unpack_from('<I', img_bytes, 0)[0] == 40:
-                                    biSize, biWidth, biHeight, biPlanes, biBitCount, biCompression, biSizeImage, biXPels, biYPels, biClrUsed, biClrImp = struct.unpack_from('<IIIHHIIIIII', img_bytes, 0)
-                                    colors = biClrUsed if biClrUsed > 0 else (1 << biBitCount if biBitCount <= 8 else 0)
+                                elif (
+                                    len(img_bytes) > 40
+                                    and struct.unpack_from("<I", img_bytes, 0)[0] == 40
+                                ):
+                                    (
+                                        biSize,
+                                        biWidth,
+                                        biHeight,
+                                        biPlanes,
+                                        biBitCount,
+                                        biCompression,
+                                        biSizeImage,
+                                        biXPels,
+                                        biYPels,
+                                        biClrUsed,
+                                        biClrImp,
+                                    ) = struct.unpack_from("<IIIHHIIIIII", img_bytes, 0)
+                                    colors = (
+                                        biClrUsed
+                                        if biClrUsed > 0
+                                        else (1 << biBitCount if biBitCount <= 8 else 0)
+                                    )
                                     bfOffBits = 14 + biSize + (colors * 4)
                                     bfSize = 14 + len(img_bytes)
-                                    bmp_header = struct.pack('<2sIHHI', b'BM', bfSize, 0, 0, bfOffBits)
+                                    bmp_header = struct.pack(
+                                        "<2sIHHI", b"BM", bfSize, 0, 0, bfOffBits
+                                    )
                                     img = Image.open(io.BytesIO(bmp_header + img_bytes))
 
                                 if img is not None:
@@ -616,15 +736,19 @@ def model_meta(source: str, output_dir: str) -> dict:
                                     scale = max(1, int(target_dim / max(w, h)))
                                     if scale > 1:
                                         img = img.resize((w * scale, h * scale), Image.LANCZOS)
-                                        if img.mode != 'RGB':
-                                            img = img.convert('RGB')
-                                        img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=120, threshold=2))
+                                        if img.mode != "RGB":
+                                            img = img.convert("RGB")
+                                        img = img.filter(
+                                            ImageFilter.UnsharpMask(
+                                                radius=1.2, percent=120, threshold=2
+                                            )
+                                        )
                                     elif max(w, h) > 1440:
                                         img.thumbnail((1440, 1440), Image.LANCZOS)
-                                        if img.mode != 'RGB':
-                                            img = img.convert('RGB')
-                                    elif img.mode != 'RGB':
-                                        img = img.convert('RGB')
+                                        if img.mode != "RGB":
+                                            img = img.convert("RGB")
+                                    elif img.mode != "RGB":
+                                        img = img.convert("RGB")
 
                                     out_path = Path(output_dir) / f"{p.stem}_thumb.png"
                                     img.save(out_path, format="PNG")
@@ -645,15 +769,17 @@ def model_meta(source: str, output_dir: str) -> dict:
                         scale = max(1, int(target_dim / max(w, h)))
                         if scale > 1:
                             img = img.resize((w * scale, h * scale), Image.LANCZOS)
-                            if img.mode != 'RGB':
-                                img = img.convert('RGB')
-                            img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=120, threshold=2))
+                            if img.mode != "RGB":
+                                img = img.convert("RGB")
+                            img = img.filter(
+                                ImageFilter.UnsharpMask(radius=1.2, percent=120, threshold=2)
+                            )
                         elif max(w, h) > 1440:
                             img.thumbnail((1440, 1440), Image.LANCZOS)
-                            if img.mode != 'RGB':
-                                img = img.convert('RGB')
-                        elif img.mode != 'RGB':
-                            img = img.convert('RGB')
+                            if img.mode != "RGB":
+                                img = img.convert("RGB")
+                        elif img.mode != "RGB":
+                            img = img.convert("RGB")
 
                         out_path = Path(output_dir) / f"{p.stem}_thumb.png"
                         img.save(out_path, format="PNG")
@@ -667,11 +793,11 @@ def model_meta(source: str, output_dir: str) -> dict:
         except Exception as e:
             res["preview_error"] = f"DWG preview failed: {e}"
 
-
     elif ext in [".psd", ".psb"]:
         # Photoshop PSD/PSB preview
         try:
             from PIL import Image
+
             img = Image.open(source)
             if max(img.size) > 1440:
                 img.thumbnail((1440, 1440), Image.LANCZOS)
@@ -687,6 +813,7 @@ def model_meta(source: str, output_dir: str) -> dict:
         # Adobe Illustrator preview (via PDF render engine)
         try:
             import pypdfium2 as pdfium
+
             pdf = pdfium.PdfDocument(source)
             page = pdf[0]
             img = page.render(scale=3).to_pil()
@@ -700,20 +827,22 @@ def model_meta(source: str, output_dir: str) -> dict:
         except Exception as e:
             res["preview_error"] = f"Illustrator preview failed: {e}"
 
-
     elif ext in [".exr", ".hdr"]:
         # OpenEXR / HDR tone-mapped thumbnail
         try:
-            from PIL import Image
             import numpy as np
+            from PIL import Image
+
             if ext == ".exr":
                 import openexr_numpy
+
                 try:
                     rgb = openexr_numpy.imread(source)
                 except Exception:
-                    rgb = openexr_numpy.imread(source, channel_names=['R'])
+                    rgb = openexr_numpy.imread(source, channel_names=["R"])
             else:
                 import imageio.v2 as iio
+
                 rgb = iio.imread(source)
 
             # Fast strided downsample only if image is huge (e.g. 8k, 16k maps)
@@ -749,20 +878,27 @@ def model_meta(source: str, output_dir: str) -> dict:
 DISPATCH = {
     "image_thumb": lambda p: image_thumb(p["source"], p["output"], p.get("size", 256)),
     "video_thumb": lambda p: video_thumb(p["source"], p["output"], p.get("timestamp", "00:00:01")),
-    "model_meta":  lambda p: model_meta(p["source"], p.get("output_dir", "")),
+    "model_meta": lambda p: model_meta(p["source"], p.get("output_dir", "")),
 }
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+        except Exception:
+            pass
+
     for raw_line in sys.stdin:
         raw_line = raw_line.strip()
         if not raw_line:
             continue
+        req_id = None
         try:
             req = json.loads(raw_line)
+            req_id = req.get("id")
             method = req.get("method", "")
             params = req.get("params", {})
-            req_id = req.get("id")
 
             if method not in DISPATCH:
                 resp = {"id": req_id, "error": f"Unknown method: {method}"}
@@ -770,7 +906,7 @@ def main() -> None:
                 result = DISPATCH[method](params)
                 resp = {"id": req_id, "result": result}
         except Exception as e:
-            resp = {"id": None, "error": str(e)}
+            resp = {"id": req_id, "error": str(e)}
 
         print(json.dumps(resp), flush=True)
 

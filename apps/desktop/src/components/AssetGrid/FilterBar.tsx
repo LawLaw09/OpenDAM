@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAssetStore } from '../../store';
 import type { AssetKind, ColorLabel } from '../../types';
-import { IconFilter, IconX, IconLayers, IconFileText, IconInbox } from '../Icons';
+import { IconFilter, IconX, IconLayers, IconFileText, IconInbox, IconHeartFilled } from '../Icons';
 import styles from './FilterBar.module.css';
 import clsx from 'clsx';
 
@@ -79,9 +79,15 @@ export function FilterBar() {
     (filter.colorLabels?.length ?? 0) > 0 ||
     filter.rating !== undefined ||
     (filter.extensions?.length ?? 0) > 0 ||
-    Boolean(filter.unorganized);
+    Boolean(filter.unorganized) ||
+    Boolean(filter.isFavorite);
 
   const activeExtCount = filter.extensions?.length ?? 0;
+
+  const toggleFavorite = () => {
+    setFilter({ isFavorite: filter.isFavorite ? undefined : true });
+    search();
+  };
 
   const toggleKind = (kind: AssetKind) => {
     const current = filter.kinds ?? [];
@@ -145,6 +151,10 @@ export function FilterBar() {
       rating: undefined,
       extensions: undefined,
       unorganized: undefined,
+      isFavorite: undefined,
+      dateRange: undefined,
+      sizeRange: undefined,
+      previewStatus: undefined,
     });
     search();
   };
@@ -156,8 +166,17 @@ export function FilterBar() {
         <div className={styles.left}>
           <IconFilter size={14} />
 
-          {/* Kind pills */}
+          {/* Kind & Status pills */}
           <div className={styles.pills}>
+            <button
+              id="filter-favorites"
+              className={clsx(styles.favoritePill, filter.isFavorite && styles.favoriteActive)}
+              onClick={toggleFavorite}
+              title="Show only favorite assets"
+            >
+              <IconHeartFilled size={12} className={clsx(filter.isFavorite ? styles.heartActive : styles.heartMuted)} />
+              <span>Favorites</span>
+            </button>
             <button
               id="filter-unorganized"
               className={clsx(styles.pill, filter.unorganized && styles.active)}
@@ -229,6 +248,7 @@ export function FilterBar() {
             <option value="name">Name</option>
             <option value="size">Size</option>
             <option value="rating">Rating</option>
+            <option value="favorite">Favorites</option>
             <option value="kind">Kind</option>
           </select>
           <button

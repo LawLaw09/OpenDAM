@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS assets (
     indexed_at       INTEGER NOT NULL,
     rating           INTEGER NOT NULL DEFAULT 0,
     color_label      TEXT NOT NULL DEFAULT 'none',
+    is_favorite      INTEGER NOT NULL DEFAULT 0,
     description      TEXT NOT NULL DEFAULT '',
     thumbnail_path   TEXT,
     preview_status   TEXT NOT NULL DEFAULT 'none',
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS assets (
 CREATE INDEX IF NOT EXISTS idx_assets_kind         ON assets(kind);
 CREATE INDEX IF NOT EXISTS idx_assets_rating       ON assets(rating);
 CREATE INDEX IF NOT EXISTS idx_assets_color_label  ON assets(color_label);
+CREATE INDEX IF NOT EXISTS idx_assets_is_favorite  ON assets(is_favorite);
 CREATE INDEX IF NOT EXISTS idx_assets_modified_at  ON assets(modified_at);
 CREATE INDEX IF NOT EXISTS idx_assets_extension    ON assets(extension);
 

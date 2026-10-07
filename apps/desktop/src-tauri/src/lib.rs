@@ -78,6 +78,47 @@ pub fn run() {
                 }
             });
 
+            // ── Cross-machine NAS change detection ───────────────────────────────
+            // When another machine writes to the shared library.sqlite, its mtime
+            // changes on the NAS. We poll every 30s and emit library:updated when
+            // we detect a newer mtime, causing the frontend to re-query automatically.
+            let poll_state = state.clone();
+            tauri::async_runtime::spawn(async move {
+                use std::collections::HashMap;
+                use std::time::SystemTime;
+
+                // seed: record the initial mtime for each known library DB
+                let mut last_seen: HashMap<String, SystemTime> = HashMap::new();
+
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+
+                    let libs = poll_state.db.get_all_libraries().await;
+                    let mut changed = false;
+
+                    for lib in &libs {
+                        let db_path = lib.root_path.join(".opendam").join("library.sqlite");
+                        if let Ok(meta) = std::fs::metadata(&db_path) {
+                            if let Ok(mtime) = meta.modified() {
+                                let prev = last_seen.entry(lib.id.clone()).or_insert(mtime);
+                                if mtime > *prev {
+                                    *prev = mtime;
+                                    changed = true;
+                                    tracing::debug!(
+                                        "NAS poll: library '{}' DB updated by another machine",
+                                        lib.name
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    if changed {
+                        let _ = poll_state.app_handle.emit("library:updated", ());
+                    }
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

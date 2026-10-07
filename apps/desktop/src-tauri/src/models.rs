@@ -67,6 +67,7 @@ impl AssetKind {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "3d_model"  => AssetKind::Model3d,
@@ -100,6 +101,8 @@ pub struct Asset {
     pub rating: i64,
     #[serde(rename = "colorLabel")]
     pub color_label: String,
+    #[serde(rename = "isFavorite", default)]
+    pub is_favorite: bool,
     pub description: String,
     pub tags: Vec<String>,
     pub collections: Vec<String>,
@@ -189,6 +192,14 @@ pub struct FilterSpec {
     pub color_labels: Option<Vec<String>>,
     pub extensions: Option<Vec<String>>,
     pub unorganized: Option<bool>,
+    #[serde(rename = "isFavorite")]
+    pub is_favorite: Option<bool>,
+    #[serde(rename = "dateRange")]
+    pub date_range: Option<DateRange>,
+    #[serde(rename = "sizeRange")]
+    pub size_range: Option<SizeRange>,
+    #[serde(rename = "previewStatus")]
+    pub preview_status: Option<String>,
     pub directory: Option<String>,
     #[serde(rename = "namePrefix")]
     pub name_prefix: Option<String>,
@@ -204,6 +215,18 @@ pub struct FilterSpec {
     pub collection_logic: Option<String>,
     #[serde(rename = "includeSubcollections")]
     pub include_subcollections: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct DateRange {
+    pub from: Option<i64>,
+    pub to: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SizeRange {
+    pub min: Option<i64>,
+    pub max: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -232,6 +255,8 @@ pub struct AssetPatch {
     pub rating: Option<i64>,
     #[serde(rename = "colorLabel")]
     pub color_label: Option<String>,
+    #[serde(rename = "isFavorite")]
+    pub is_favorite: Option<bool>,
     pub description: Option<String>,
     pub tags: Option<Vec<String>>,
     #[serde(rename = "thumbnailPath")]

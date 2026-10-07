@@ -78,7 +78,7 @@
 .previewBadge {
   position: absolute;
   top: var(--space-2);
-  right: var(--space-2);
+  right: 36px;
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -87,6 +87,7 @@
   justify-content: center;
   font-size: 11px;
   font-weight: 700;
+  z-index: 4;
 }
 .generating {
   background: hsl(220 85% 50% / 0.9);
@@ -95,6 +96,59 @@
 .error {
   background: hsl(4 84% 55% / 0.9);
   color: #fff;
+}
+
+/* Favorite button */
+.favoriteBtn {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(15, 20, 28, 0.65);
+  backdrop-filter: blur(8px);
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.88);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+  z-index: 5;
+  padding: 0;
+}
+
+.card:hover .favoriteBtn,
+.favoriteBtn.favoriteActive {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.favoriteBtn:hover {
+  background: rgba(22, 28, 40, 0.95);
+  color: hsl(350 90% 70%);
+  border-color: hsl(350 85% 60% / 0.6);
+  transform: scale(1.12);
+}
+
+.favoriteActive {
+  background: hsl(350 85% 50% / 0.22);
+  border-color: hsl(350 85% 60% / 0.65);
+  color: hsl(350 90% 60%);
+  box-shadow: 0 0 10px hsl(350 85% 55% / 0.35);
+}
+
+.favoriteHeartFilled {
+  color: hsl(350 89% 60%);
+  filter: drop-shadow(0 0 4px hsl(350 89% 60% / 0.6));
 }
 
 .colorStripe {

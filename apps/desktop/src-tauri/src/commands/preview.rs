@@ -73,7 +73,7 @@ pub async fn get_preview_jobs(state: State<'_, Arc<AppState>>) -> Result<Vec<Pre
         }
     }
 
-    all_jobs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    all_jobs.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     all_jobs.truncate(100);
     Ok(all_jobs)
 }

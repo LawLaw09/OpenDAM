@@ -50,6 +50,7 @@ export interface Asset {
   /** Star rating 0–5 */
   rating: number;
   colorLabel: ColorLabel;
+  isFavorite: boolean;
   description: string;
   tags: string[];       // tag IDs
   collections?: string[]; // collection IDs
@@ -82,7 +83,7 @@ export interface Collection {
 }
 
 // ── Search & Filter ──────────────────────────────────────────────────────
-export type SortField = 'name' | 'date' | 'size' | 'rating' | 'kind';
+export type SortField = 'name' | 'date' | 'size' | 'rating' | 'kind' | 'favorite';
 export type SortOrder = 'asc' | 'desc';
 
 export interface FilterSpec {
@@ -90,7 +91,9 @@ export interface FilterSpec {
   tags?: string[];
   rating?: { min: number; max: number };
   colorLabels?: ColorLabel[];
+  isFavorite?: boolean;
   dateRange?: { from?: number; to?: number };
+  sizeRange?: { min?: number; max?: number };
   extensions?: string[];
   previewStatus?: Asset['previewStatus'];
   unorganized?: boolean;
