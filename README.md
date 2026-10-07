@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![OpenDAM Banner](https://raw.githubusercontent.com/OpenDAM/opendam/main/apps/desktop/src-tauri/icons/128x128.png)
+![OpenDAM Banner](https://raw.githubusercontent.com/LawLaw09/OpenDAM/main/apps/desktop/src-tauri/icons/128x128.png)
 
 ### The First Free & Open-Source Digital Asset Management (DAM) System for 3D, CAD, Architecture & Design
 
@@ -95,7 +95,7 @@ Network-attached storage (NAS) and office SMB shares have limited read/write cap
 
 ```bash
 # Clone the repository
-git clone https://github.com/OpenDAM/opendam.git
+git clone https://github.com/LawLaw09/OpenDAM.git
 cd opendam
 
 # Install dependencies

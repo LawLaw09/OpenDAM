@@ -53,7 +53,7 @@ Before developing locally, ensure you have the following installed:
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/OpenDAM/opendam.git
+   git clone https://github.com/LawLaw09/OpenDAM.git
    cd opendam
    ```
 
@@ -148,7 +148,7 @@ When contributing code, please adhere to our core design principles:
 ## 💬 Community & Questions
 
 Have questions, ideas, or feedback?
-- Open an [Issue](https://github.com/OpenDAM/opendam/issues) for bug reports and feature proposals.
-- Join the discussion in [GitHub Discussions](https://github.com/OpenDAM/opendam/discussions).
+- Open an [Issue](https://github.com/LawLaw09/OpenDAM/issues) for bug reports and feature proposals.
+- Join the discussion in [GitHub Discussions](https://github.com/LawLaw09/OpenDAM/discussions).
 
 Thank you for helping make OpenDAM the best open-source asset manager for creators worldwide!
