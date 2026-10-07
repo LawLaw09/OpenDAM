@@ -17,6 +17,10 @@
 
 [**Download Latest Release (.exe)**](#-download--installation) • [**Features**](#-features) • [**NAS & Team Workflow**](#-network-and-nas-architecture) • [**Build from Source**](#-build-from-source)
 
+<br/><br/>
+
+[![OpenDAM User Interface](docs/images/opendam-ui.jpg)](https://github.com/LawLaw09/OpenDAM)
+
 </div>
 
 ---
