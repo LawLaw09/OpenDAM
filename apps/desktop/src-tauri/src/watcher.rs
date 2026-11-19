@@ -111,6 +111,34 @@ pub fn is_revit_backup(file_name: &str) -> bool {
     false
 }
 
+/// Tracks directories the indexer could not read, as library-relative `/` paths.
+#[derive(Default)]
+struct UnreadableDirs {
+    /// A whole root was unreachable: no asset may be considered deleted.
+    whole_library: bool,
+    dir_prefixes: Vec<String>,
+}
+
+impl UnreadableDirs {
+    fn add_dir(&mut self, rel_dir: String) {
+        let mut prefix = rel_dir.trim_end_matches('/').to_string();
+        if prefix.is_empty() {
+            self.whole_library = true;
+            return;
+        }
+        prefix.push('/');
+        self.dir_prefixes.push(prefix);
+    }
+
+    /// True if `rel_path` lies in a part of the tree we could not read.
+    fn covers(&self, rel_path: &str) -> bool {
+        self.whole_library
+            || self.dir_prefixes.iter().any(|p| {
+                rel_path.starts_with(p.as_str()) || rel_path == p.trim_end_matches('/')
+            })
+    }
+}
+
 struct PendingAsset {
     id: String,
     file_path: String,
@@ -134,12 +162,14 @@ struct PendingAsset {
 /// 4. Groups writes into chunks of 200 inside single transactions (cutting NAS I/O by 99%).
 /// 5. Advisory index.lock prevents two machines from indexing the same library simultaneously.
 pub async fn index_paths(db: &Database, library_id: &str, paths: &[String]) -> Result<()> {
-    let handle_opt = db.get_library_handle(Some(library_id)).await;
-    let (pool, root_path) = match handle_opt {
+    // Look the library up by exact id. Never fall back to another library: if this
+    // library's root was offline at startup it is not open, and indexing it against a
+    // different library's pool would mark every asset in that library as deleted.
+    let (pool, root_path) = match db.get_library_handle_exact(library_id).await {
         Some(h) => (h.pool, h.root_path),
         None => {
-            let p = PathBuf::from(paths.first().map(|s| s.as_str()).unwrap_or("."));
-            (db.pool.clone(), p)
+            tracing::warn!("Library {} is not open (root offline?) — skipping index", library_id);
+            return Ok(());
         }
     };
 
@@ -171,10 +201,18 @@ pub async fn index_paths(db: &Database, library_id: &str, paths: &[String]) -> R
 
     let mut seen_paths: HashSet<String> = HashSet::with_capacity(existing_map.len() + 100);
     let mut pending_batch: Vec<PendingAsset> = Vec::with_capacity(200);
+    // Parts of the tree we could not read. Assets under them must not be treated as
+    // deleted: an offline NAS or a permission error is not the same as an empty folder.
+    let mut unreadable = UnreadableDirs::default();
 
     // ── 2. Walk directory tree ──────────────────────────────────────────
     for root in paths {
         let root_dir = Path::new(root);
+        if !root_dir.is_dir() {
+            tracing::warn!("Library root {:?} is not reachable — skipping deletion pass", root_dir);
+            unreadable.whole_library = true;
+            continue;
+        }
         let walker = WalkDir::new(root_dir)
             .follow_links(true)
             .into_iter()
@@ -187,7 +225,26 @@ pub async fn index_paths(db: &Database, library_id: &str, paths: &[String]) -> R
                 true
             });
 
-        for entry in walker.filter_map(|e| e.ok()).filter(|e| e.file_type().is_file()) {
+        for entry in walker {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    match e.path() {
+                        Some(p) if e.depth() > 0 => {
+                            tracing::warn!("Could not read {:?} while indexing: {}", p, e);
+                            unreadable.add_dir(make_relative_path(&root_path, p));
+                        }
+                        _ => {
+                            tracing::warn!("Could not read library root {:?}: {}", root_dir, e);
+                            unreadable.whole_library = true;
+                        }
+                    }
+                    continue;
+                }
+            };
+            if !entry.file_type().is_file() {
+                continue;
+            }
             let path = entry.path();
             let ext = path
                 .extension()
@@ -305,13 +362,23 @@ pub async fn index_paths(db: &Database, library_id: &str, paths: &[String]) -> R
     // ── 3. Detect and remove deleted files in batch ───────────────────────
     let to_delete: Vec<String> = existing_map
         .into_iter()
-        .filter(|(rel, _)| !seen_paths.contains(rel))
+        .filter(|(rel, _)| !seen_paths.contains(rel) && !unreadable.covers(rel))
         .map(|(_, (id, _, _, _))| id)
         .collect();
 
     if !to_delete.is_empty() {
         for chunk in to_delete.chunks(200) {
             let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            // foreign_keys is OFF, so ON DELETE CASCADE does not fire: clean up the
+            // join tables by hand or tag/collection counts keep the removed assets.
+            for table in ["asset_tags", "collection_assets", "preview_jobs"] {
+                let sql = format!("DELETE FROM {} WHERE asset_id IN ({})", table, placeholders);
+                let mut query = sqlx::query(&sql);
+                for id in chunk {
+                    query = query.bind(id);
+                }
+                let _ = query.execute(&pool).await;
+            }
             let sql = format!("DELETE FROM assets WHERE id IN ({})", placeholders);
             let mut query = sqlx::query(&sql);
             for id in chunk {
@@ -362,6 +429,23 @@ async fn commit_asset_batch(pool: &sqlx::Pool<sqlx::Sqlite>, batch: &[PendingAss
             .bind(&item.id)
             .execute(&mut *tx)
             .await?;
+
+            // A changed file that still needs a preview gets marked 'pending' above;
+            // without a job row the worker never picks it up and the spinner never ends.
+            if item.needs_job {
+                let _ = sqlx::query("DELETE FROM preview_jobs WHERE asset_id = ?")
+                    .bind(&item.id)
+                    .execute(&mut *tx)
+                    .await;
+                let _ = sqlx::query(
+                    "INSERT INTO preview_jobs (id, asset_id, status, created_at) VALUES (?, ?, 'pending', ?)"
+                )
+                .bind(Uuid::new_v4().to_string())
+                .bind(&item.id)
+                .bind(item.now)
+                .execute(&mut *tx)
+                .await;
+            }
         } else {
             sqlx::query(
                 r#"INSERT INTO assets
@@ -408,5 +492,75 @@ pub struct LibraryWatcher {}
 impl LibraryWatcher {
     pub fn new() -> Self {
         Self {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unreadable_dirs_cover_only_their_subtree() {
+        let mut u = UnreadableDirs::default();
+        u.add_dir("models/locked".into());
+        assert!(u.covers("models/locked/chair.max"));
+        assert!(u.covers("models/locked/deep/chair.max"));
+        assert!(!u.covers("models/locked2/chair.max"));
+        assert!(!u.covers("models/chair.max"));
+        assert!(!u.whole_library);
+        u.add_dir(String::new());
+        assert!(u.covers("anything.max"));
+    }
+
+    fn scratch_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("opendam-test-{}-{}", tag, Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    async fn asset_count(db: &Database, lib_id: &str) -> i64 {
+        let h = db.get_library_handle_exact(lib_id).await.unwrap();
+        sqlx::query_scalar("SELECT COUNT(*) FROM assets").fetch_one(&h.pool).await.unwrap()
+    }
+
+    /// An unopened library id must not be indexed against another library's DB, and an
+    /// unreachable root must not mark the library's assets as deleted.
+    #[tokio::test]
+    async fn offline_root_does_not_delete_assets() {
+        let base = scratch_dir("offline");
+        let lib_root = base.join("lib");
+        std::fs::create_dir_all(lib_root.join("sub")).unwrap();
+        std::fs::write(lib_root.join("sub").join("chair.obj"), b"v 0 0 0\n").unwrap();
+        std::fs::write(lib_root.join("table.obj"), b"v 0 0 0\n").unwrap();
+
+        let master = base.join("master.sqlite");
+        let db = Database::new(master.to_str().unwrap()).await.unwrap();
+        db.register_library("lib-a", "A", &lib_root).await.unwrap();
+        let root_str = lib_root.to_string_lossy().to_string();
+
+        index_paths(&db, "lib-a", std::slice::from_ref(&root_str)).await.unwrap();
+        assert_eq!(asset_count(&db, "lib-a").await, 2);
+
+        // A library that is registered in master but not open (its DB failed to open)
+        // used to fall back to lib-a's pool, walk its own (readable, empty) root, see
+        // none of lib-a's files, and delete them all.
+        let other_root = base.join("other-lib");
+        std::fs::create_dir_all(&other_root).unwrap();
+        let other = other_root.to_string_lossy().to_string();
+        index_paths(&db, "lib-not-open", &[other]).await.unwrap();
+        assert_eq!(asset_count(&db, "lib-a").await, 2);
+        let offline = base.join("offline-nas").to_string_lossy().to_string();
+
+        // lib-a's own root becoming unreachable must not wipe it either.
+        index_paths(&db, "lib-a", &[offline]).await.unwrap();
+        assert_eq!(asset_count(&db, "lib-a").await, 2);
+
+        // A file genuinely removed from a readable root is still cleaned up.
+        std::fs::remove_file(lib_root.join("table.obj")).unwrap();
+        index_paths(&db, "lib-a", &[root_str]).await.unwrap();
+        assert_eq!(asset_count(&db, "lib-a").await, 1);
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

@@ -298,6 +298,11 @@ impl Database {
         libs.values().next().cloned()
     }
 
+    /// Look up an open library by id with no fallback to another library.
+    pub async fn get_library_handle_exact(&self, id: &str) -> Option<LibraryHandle> {
+        self.libraries.read().await.get(id).cloned()
+    }
+
     pub async fn get_library_root(&self, id: Option<&str>) -> Option<PathBuf> {
         self.get_library_handle(id).await.map(|h| h.root_path)
     }

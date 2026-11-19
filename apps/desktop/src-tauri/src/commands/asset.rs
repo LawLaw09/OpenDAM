@@ -75,6 +75,50 @@ fn row_to_asset(root: Option<&Path>, row: RawAssetRow) -> Asset {
     }
 }
 
+/// Turn free-form search text into a safe FTS5 MATCH expression.
+///
+/// Raw user text is not valid FTS5 syntax in general: `chair.max`, `table-01`,
+/// a stray `"` or a bare `AND` all raise "fts5: syntax error". Each whitespace-separated
+/// term is quoted as a string (doubling embedded quotes) and made a prefix query,
+/// and terms are ANDed implicitly. Returns `None` when there is nothing to search for.
+pub(crate) fn build_fts_query(text: &str) -> Option<String> {
+    let terms: Vec<String> = text
+        .split_whitespace()
+        .map(|t| format!("\"{}\"*", t.replace('"', "\"\"")))
+        .collect();
+    if terms.is_empty() {
+        None
+    } else {
+        Some(terms.join(" "))
+    }
+}
+
+/// Work out the on-disk name for a rename.
+///
+/// The asset keeps its extension: if the typed name already ends in it (any case) it is
+/// used as typed, otherwise the old extension is appended. This keeps names such as
+/// `chair v1.2` from turning a `.max` file into a `.2` file.
+pub(crate) fn rename_target(typed: &str, old_ext: &str) -> String {
+    if old_ext.is_empty() {
+        return typed.to_string();
+    }
+    match typed.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && ext.eq_ignore_ascii_case(old_ext) => typed.to_string(),
+        _ => format!("{}.{}", typed, old_ext),
+    }
+}
+
+/// Whether two paths name the same file for rename-collision purposes.
+/// Windows filesystems are case-insensitive, so `Chair.max` → `chair.max` is a
+/// case-only rename of the same file, not a collision.
+fn same_file_path(a: &Path, b: &Path) -> bool {
+    if cfg!(windows) {
+        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+    } else {
+        a == b
+    }
+}
+
 #[tauri::command]
 pub async fn search_assets(
     payload: SearchPayload,
@@ -116,17 +160,16 @@ pub async fn search_assets(
     let offset = payload.page * payload.page_size;
     let limit = payload.page_size;
 
-    let has_fts = !payload.query.text.trim().is_empty();
     let f = &payload.query.filter;
 
     let mut conditions: Vec<String> = Vec::new();
     let mut binds: Vec<String> = Vec::new();
 
-    if has_fts {
+    if let Some(fts_query) = build_fts_query(&payload.query.text) {
         conditions.push(
             "a.id IN (SELECT id FROM assets_fts WHERE assets_fts MATCH ?)".into(),
         );
-        binds.push(format!("{}*", payload.query.text.trim()));
+        binds.push(fts_query);
     }
 
     if let Some(kinds) = &f.kinds {
@@ -401,7 +444,7 @@ pub async fn search_assets(
     };
 
     let sort_col = match payload.query.sort.field.as_str() {
-        "name"     => "a.file_name",
+        "name"     => "a.file_name COLLATE NOCASE",
         "size"     => "a.size_bytes",
         "rating"   => "a.rating",
         "kind"     => "a.kind",
@@ -424,7 +467,7 @@ pub async fn search_assets(
             (SELECT json_group_array(collection_id) FROM collection_assets WHERE asset_id = a.id) AS collections
            FROM assets a
            {}
-           ORDER BY {} {}
+           ORDER BY {} {}, a.id ASC
            LIMIT ? OFFSET ?"#,
         where_clause, sort_col, sort_dir
     );
@@ -471,7 +514,7 @@ pub async fn search_assets(
             (SELECT json_group_array(collection_id) FROM collection_assets WHERE asset_id = a.id) AS collections
            FROM assets a
            {}
-           ORDER BY {} {}
+           ORDER BY {} {}, a.id ASC
            LIMIT ?"#,
         where_clause, sort_col, sort_dir
     );
@@ -513,7 +556,9 @@ pub async fn search_assets(
             "favorite" => a.is_favorite.cmp(&b.is_favorite),
             _          => a.modified_at.cmp(&b.modified_at),
         };
-        if is_asc { cmp } else { cmp.reverse() }
+        let cmp = if is_asc { cmp } else { cmp.reverse() };
+        // Same tiebreaker as the SQL ORDER BY, so pages don't shuffle between requests
+        cmp.then_with(|| a.id.cmp(&b.id))
     });
 
     let paged_assets: Vec<Asset> = all_assets
@@ -613,9 +658,9 @@ pub async fn update_asset(
     if master_exists.is_some() || pools_to_update.is_empty() {
         pools_to_update.push((state.db.master_pool.clone(), state.db.get_library_root(None).await));
     }
-
-    let active_pool = state.db.get_active_pool().await;
-    pools_to_update.push((active_pool, state.db.get_library_root(None).await));
+    // Only pools that actually hold this asset are written. Previously the "active"
+    // pool (an arbitrary open library) was always written too, leaving orphan
+    // asset_tags rows in libraries that don't contain the asset.
 
     for (pool, root) in &pools_to_update {
         if let Some(rating) = patch.rating {
@@ -685,6 +730,7 @@ pub async fn delete_asset(
     let should_delete_file = delete_file.unwrap_or(true);
     let libs = state.db.get_all_libraries().await;
     let mut target_pools = Vec::new();
+    let mut owning_libs: Vec<(String, sqlx::Pool<sqlx::Sqlite>)> = Vec::new();
     let mut file_to_delete: Option<std::path::PathBuf> = None;
 
     for lib in &libs {
@@ -702,6 +748,7 @@ pub async fn delete_asset(
             };
             file_to_delete = Some(abs_path);
             target_pools.push(lib.pool.clone());
+            owning_libs.push((lib.id.clone(), lib.pool.clone()));
         }
     }
 
@@ -727,7 +774,22 @@ pub async fn delete_asset(
         let _ = sqlx::query("DELETE FROM collection_assets WHERE asset_id = ?").bind(&id).execute(&pool).await;
         let _ = sqlx::query("DELETE FROM preview_jobs WHERE asset_id = ?").bind(&id).execute(&pool).await;
         let _ = sqlx::query("DELETE FROM assets WHERE id = ?").bind(&id).execute(&pool).await;
-        let _ = sqlx::query("UPDATE libraries SET asset_count = (SELECT COUNT(*) FROM assets)").execute(&pool).await;
+    }
+
+    // Recount each owning library from its own DB. The old un-scoped
+    // `UPDATE libraries SET asset_count = (SELECT COUNT(*) FROM assets)` ran against the
+    // master DB, overwriting every library's count with the master's (usually 0).
+    for (lib_id, pool) in &owning_libs {
+        if let Ok(count) = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM assets")
+            .fetch_one(pool)
+            .await
+        {
+            let _ = sqlx::query("UPDATE libraries SET asset_count = ? WHERE id = ?")
+                .bind(count)
+                .bind(lib_id)
+                .execute(&state.db.master_pool)
+                .await;
+        }
     }
 
     let _ = state.app_handle.emit("library:updated", ());
@@ -752,7 +814,8 @@ pub async fn rename_asset(
     new_name: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<Asset> {
-    let trimmed = new_name.trim();
+    // Windows silently strips trailing dots and spaces, so drop them up front.
+    let trimmed = new_name.trim().trim_end_matches(['.', ' ']);
     if trimmed.is_empty() {
         return Err("Asset file name cannot be empty".into());
     }
@@ -797,20 +860,12 @@ pub async fn rename_asset(
         .parent()
         .ok_or_else(|| "Could not determine parent directory".to_string())?;
 
-    // Determine new filename and extension
-    let (final_name, new_ext) = if let Some((stem, ext)) = trimmed.rsplit_once('.') {
-        if !stem.is_empty() && !ext.is_empty() {
-            (trimmed.to_string(), ext.to_lowercase())
-        } else {
-            (format!("{}.{}", trimmed, old_ext), old_ext.clone())
-        }
-    } else {
-        (format!("{}.{}", trimmed, old_ext), old_ext.clone())
-    };
+    let final_name = rename_target(trimmed, &old_ext);
+    let new_ext = old_ext.clone();
 
     let new_abs_path = parent_dir.join(&final_name);
 
-    if new_abs_path.exists() && new_abs_path != old_abs_path {
+    if new_abs_path.exists() && !same_file_path(&new_abs_path, &old_abs_path) {
         return Err(format!("A file named '{}' already exists in this folder", final_name));
     }
 
@@ -821,7 +876,14 @@ pub async fn rename_asset(
     }
 
     let new_rel_fp = make_relative_path(&lib.root_path, &new_abs_path);
-    let now = chrono::Utc::now().timestamp_millis();
+    // Store the file's real mtime (rename doesn't change it); writing "now" here made
+    // the next index pass see a mismatch and rewrite the row for no reason.
+    let now = std::fs::metadata(&new_abs_path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
 
     // Update in all relevant databases
     let pools_to_update = vec![lib.pool.clone(), state.db.master_pool.clone(), state.db.get_active_pool().await];
@@ -840,4 +902,75 @@ pub async fn rename_asset(
 
     let _ = state.app_handle.emit("library:updated", ());
     get_asset(id, state).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fts_query_quotes_terms_and_adds_prefix() {
+        assert_eq!(build_fts_query(""), None);
+        assert_eq!(build_fts_query("   "), None);
+        assert_eq!(build_fts_query("chair").as_deref(), Some("\"chair\"*"));
+        assert_eq!(build_fts_query(" chair  table ").as_deref(), Some("\"chair\"* \"table\"*"));
+        assert_eq!(build_fts_query("a\"b").as_deref(), Some("\"a\"\"b\"*"));
+    }
+
+    /// Runs the generated expressions against a real FTS5 table: every one of these
+    /// raised "fts5: syntax error" when the raw text was passed to MATCH.
+    #[tokio::test]
+    async fn fts_query_is_valid_fts5_syntax() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("CREATE VIRTUAL TABLE t USING fts5(file_name)")
+            .execute(&pool).await.unwrap();
+        for name in ["chair.max", "table-01.fbx", "Sofa Modern v2.skp", "AND.obj"] {
+            sqlx::query("INSERT INTO t(file_name) VALUES (?)")
+                .bind(name).execute(&pool).await.unwrap();
+        }
+
+        let cases = [
+            ("chair.max", 1),
+            ("table-01", 1),
+            ("sofa mod", 1),
+            ("AND", 1),
+            ("\"unbalanced", 0),
+            ("(", 0),
+            ("NOT", 0),
+            ("cha", 1),
+        ];
+        for (input, expected) in cases {
+            let q = build_fts_query(input).unwrap();
+            let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM t WHERE t MATCH ?")
+                .bind(&q)
+                .fetch_one(&pool)
+                .await
+                .unwrap_or_else(|e| panic!("query for {:?} ({}) failed: {}", input, q, e));
+            assert_eq!(n, expected, "input {:?} -> {}", input, q);
+        }
+    }
+
+    #[test]
+    fn rename_keeps_extension() {
+        assert_eq!(rename_target("chair", "max"), "chair.max");
+        assert_eq!(rename_target("chair.max", "max"), "chair.max");
+        assert_eq!(rename_target("Chair.MAX", "max"), "Chair.MAX");
+        assert_eq!(rename_target("chair v1.2", "max"), "chair v1.2.max");
+        assert_eq!(rename_target("chair.fbx", "max"), "chair.fbx.max");
+        assert_eq!(rename_target(".max", "max"), ".max.max");
+        assert_eq!(rename_target("README", ""), "README");
+    }
+
+    #[test]
+    fn case_only_rename_is_same_file_on_windows() {
+        let a = Path::new("C:/lib/Chair.max");
+        let b = Path::new("C:/lib/chair.max");
+        assert_eq!(same_file_path(a, b), cfg!(windows));
+        assert!(same_file_path(a, a));
+        assert!(!same_file_path(a, Path::new("C:/lib/table.max")));
+    }
 }

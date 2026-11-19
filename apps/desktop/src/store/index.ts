@@ -184,6 +184,8 @@ const defaultQuery: SearchQuery = {
   includeSubcollections: true,
 };
 
+let searchRequestSeq = 0;
+
 export const useAssetStore = create<AssetStore>()((set, get) => ({
   assets: [],
   total: 0,
@@ -239,13 +241,18 @@ export const useAssetStore = create<AssetStore>()((set, get) => ({
 
   search: async () => {
     const { query, page, pageSize } = get();
+    // Searches fire on every keystroke/filter change; responses can arrive out of
+    // order. Only the latest request may write results, or an older, slower query
+    // overwrites the grid with results for text the user has already changed.
+    const requestId = ++searchRequestSeq;
     set({ loading: true });
     try {
       const result = await api.searchAssets({ query, page, pageSize });
+      if (requestId !== searchRequestSeq) return;
       const assetMap = new Map(result.assets.map((a) => [a.id, a]));
       set({ assets: result.assets, total: result.total, assetMap });
     } finally {
-      set({ loading: false });
+      if (requestId === searchRequestSeq) set({ loading: false });
     }
   },
 

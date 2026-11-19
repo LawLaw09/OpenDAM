@@ -199,11 +199,16 @@ pub fn start_preview_worker(state: Arc<AppState>) {
                 let _ = tokio::fs::create_dir_all(&thumb_dir).await;
 
                 // Poll batch of up to 10 jobs to minimize SQLite round-trip overhead
-                let jobs: Vec<(String, String, String)> = sqlx::query_as(
-                    "SELECT p.id, p.asset_id, a.file_path FROM preview_jobs p JOIN assets a ON p.asset_id = a.id WHERE p.status = 'queued' OR p.status = 'pending' LIMIT 10"
+                let jobs: Vec<(String, String, String, String)> = sqlx::query_as(
+                    "SELECT p.id, p.asset_id, a.file_path, p.status FROM preview_jobs p JOIN assets a ON p.asset_id = a.id WHERE p.status = 'queued' OR p.status = 'pending' LIMIT 10"
                 ).fetch_all(pool).await.unwrap_or_default();
 
-                for (job_id, asset_id, file_path) in jobs {
+                for (job_id, asset_id, file_path, job_status) in jobs {
+                    // 'queued' jobs come from an explicit user request (request_preview);
+                    // the indexer creates 'pending' ones. A user request must re-render even
+                    // when a thumbnail already exists, otherwise "Regenerate" is a no-op.
+                    // The new render overwrites the old file only on success.
+                    let force_render = job_status == "queued";
                     processed_any = true;
 
                     if let Err(e) = sqlx::query("UPDATE preview_jobs SET status = 'processing' WHERE id = ?")
@@ -236,7 +241,9 @@ pub fn start_preview_worker(state: Arc<AppState>) {
                     let thumb_png = thumb_dir.join(format!("{}_thumb.png", file_stem));
                     let thumb_jpg = thumb_dir.join(format!("{}_thumb.jpg", file_stem));
 
-                    let existing_thumb = if thumb_png.exists() {
+                    let existing_thumb = if force_render {
+                        None
+                    } else if thumb_png.exists() {
                         Some(format!(".opendam/thumbs/{}_thumb.png", file_stem))
                     } else if thumb_jpg.exists() {
                         Some(format!(".opendam/thumbs/{}_thumb.jpg", file_stem))
