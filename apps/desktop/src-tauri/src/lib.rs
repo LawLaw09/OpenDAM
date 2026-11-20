@@ -3,6 +3,7 @@ pub mod db;
 pub mod models;
 pub mod watcher;
 pub mod preview;
+pub mod embedded;
 
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -57,6 +58,10 @@ pub fn run() {
 
             app.manage(state.clone());
             
+            // Resolve the Python preview worker before indexing starts, so the
+            // backfill knows which formats can be rendered in this run.
+            crate::preview::init_worker_command(app.handle());
+
             // Start the background preview worker queue
             crate::preview::start_preview_worker(state.clone());
 

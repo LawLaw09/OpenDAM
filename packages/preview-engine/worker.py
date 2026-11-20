@@ -20,8 +20,11 @@ Phase 2 will add:
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -72,6 +75,126 @@ def video_thumb(source: str, output: str, timestamp: str = "00:00:01") -> dict:
         return {"ok": False, "error": "ffmpeg not found — install ffmpeg and add to PATH"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+def _blender_candidates() -> list[str]:
+    """Find an installed Blender for FBX files Assimp cannot triangulate."""
+    candidates: list[str] = []
+    override = os.environ.get("OPENDAM_BLENDER")
+    if override:
+        candidates.append(override)
+    found = shutil.which("blender")
+    if found:
+        candidates.append(found)
+    if os.name == "nt":
+        for base in (
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Blender Foundation",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Blender Foundation",
+        ):
+            installs = sorted(base.glob("Blender *"), reverse=True)
+            candidates.extend(str(p / "blender.exe") for p in installs)
+    return list(dict.fromkeys(p for p in candidates if Path(p).is_file()))
+
+
+def _blender_fbx_preview(source: str, output_dir: str, stem: str) -> dict | None:
+    """Fallback for FBX variants rejected by assimp_py; uses Blender only if installed."""
+    candidates = _blender_candidates()
+    if not candidates:
+        return None
+
+    import trimesh
+
+    output_root = Path(output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+    output = output_root / f"{stem}_preview.glb"
+    script = '''
+import bpy, math, sys
+from mathutils import Vector
+src, dst, thumb = sys.argv[-3:]
+bpy.ops.import_scene.fbx(filepath=src)
+objects = [o for o in bpy.context.scene.objects if o.type == 'MESH' and len(o.data.polygons)]
+if not objects:
+    raise RuntimeError('FBX contains no renderable mesh objects')
+bpy.ops.export_scene.gltf(filepath=dst, export_format='GLB')
+scene = bpy.context.scene
+corners = [o.matrix_world @ Vector(c) for o in objects for c in o.bound_box]
+lo = Vector(tuple(min(v[i] for v in corners) for i in range(3)))
+hi = Vector(tuple(max(v[i] for v in corners) for i in range(3)))
+center = (lo + hi) * 0.5
+size = max((hi - lo).length, 0.01)
+direction = Vector((1.6, -2.2, 1.45)).normalized()
+bpy.ops.object.camera_add(location=center + direction * size * 2.6)
+camera = bpy.context.object
+camera.data.type = 'ORTHO'
+camera.data.ortho_scale = size * 1.55
+camera.rotation_euler = (center - camera.location).to_track_quat('-Z', 'Y').to_euler()
+scene.camera = camera
+for name, offset, energy, area in (
+    ('Key', Vector((1, -1, 2)), 900, 1.4),
+    ('Fill', Vector((-1, -0.5, 0.5)), 500, 1.8),
+    ('Rim', Vector((0.5, 1, 1.5)), 750, 1.2),
+):
+    bpy.ops.object.light_add(type='AREA', location=center + offset.normalized() * size * 1.8)
+    light = bpy.context.object
+    light.name = name
+    light.data.energy = energy * max(size, 0.1) ** 2
+    light.data.shape = 'DISK'
+    light.data.size = area * max(size, 0.1)
+    light.rotation_euler = (center - light.location).to_track_quat('-Z', 'Y').to_euler()
+scene.render.engine = 'BLENDER_EEVEE_NEXT' if bpy.app.version >= (4, 2, 0) else 'BLENDER_EEVEE'
+scene.render.resolution_x = 512
+scene.render.resolution_y = 512
+scene.render.resolution_percentage = 100
+scene.render.image_settings.file_format = 'PNG'
+scene.render.film_transparent = False
+scene.world.color = (0.045, 0.055, 0.075)
+scene.view_settings.view_transform = 'Standard'
+scene.render.filepath = thumb
+bpy.ops.render.render(write_still=True)
+'''
+    last_error = "Blender FBX conversion failed"
+    for blender in candidates:
+        script_path = None
+        try:
+            output.unlink(missing_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", suffix=".py", prefix="opendam_fbx_",
+                delete=False,
+            ) as f:
+                f.write(script)
+                script_path = f.name
+            env = os.environ.copy()
+            env.pop("PYTHONHOME", None)
+            env.pop("PYTHONPATH", None)
+            run = subprocess.run(
+                [blender, "--background", "--factory-startup", "--python", script_path,
+                 "--", source, str(output), str(Path(output_dir) / f"{stem}_thumb.png")],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=50,
+                check=False, env=env,
+            )
+            if run.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
+                last_error = (run.stderr or run.stdout or f"exit code {run.returncode}")[-1200:]
+                continue
+
+            result = {"ok": True, "preview_model": str(output), "metadata": {}}
+            try:
+                scene = trimesh.load(str(output), force="scene")
+                result["metadata"]["object_count"] = len(scene.geometry)
+                result["metadata"]["poly_count"] = sum(
+                    len(g.faces) for g in scene.geometry.values() if hasattr(g, "faces")
+                )
+                thumb = Path(output_dir) / f"{stem}_thumb.png"
+                if thumb.is_file() and thumb.stat().st_size > 0:
+                    result["thumbnail"] = str(thumb)
+            except Exception as e:
+                result["preview_error"] = f"Blender model loaded but snapshot failed: {e}"
+            return result
+        except (OSError, subprocess.SubprocessError) as e:
+            last_error = str(e)
+        finally:
+            if script_path:
+                Path(script_path).unlink(missing_ok=True)
+    raise RuntimeError(f"Blender fallback failed: {last_error}")
 
 
 # ── 3D model metadata & previews ──────────────────────────────────────────────
@@ -322,7 +445,22 @@ def model_meta(source: str, output_dir: str) -> dict:
             else:
                 res["preview_error"] = "No valid meshes in FBX/3DS file"
         except Exception as e:
-            res["preview_error"] = f"FBX/3DS convert failed: {e}"
+            if ext == ".fbx":
+                try:
+                    fallback = _blender_fbx_preview(source, output_dir, p.stem)
+                    if fallback:
+                        res.update(fallback)
+                        meta.update(fallback.get("metadata", {}))
+                    else:
+                        res["preview_error"] = (
+                            f"FBX convert failed: {e} (no Blender installation found for fallback)"
+                        )
+                except Exception as blender_error:
+                    res["preview_error"] = (
+                        f"FBX convert failed: {e}; Blender fallback failed: {blender_error}"
+                    )
+            else:
+                res["preview_error"] = f"FBX/3DS convert failed: {e}"
 
     elif ext == ".vrmat":
         # V-Ray Material file preview

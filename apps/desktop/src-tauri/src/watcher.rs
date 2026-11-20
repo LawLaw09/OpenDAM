@@ -308,12 +308,7 @@ pub async fn index_paths(db: &Database, library_id: &str, paths: &[String]) -> R
                 preview_status = "done";
                 thumbnail_path = Some(format!(".opendam/thumbs/{}_thumb.jpg", stem));
             } else {
-                let needs_preview = matches!(
-                    ext.as_str(),
-                    "max" | "fbx" | "obj" | "gltf" | "glb" | "dae" | "stl" | "3ds" | "skp" | "rfa" | "rvt" | "dwg" | "3dm" | "vrmat" | "psd" | "psb" | "ai" | "exr" | "hdr"
-                    | "jpg" | "jpeg" | "png" | "tif" | "tiff" | "tga" | "bmp" | "webp"
-                );
-                if needs_preview {
+                if crate::preview::needs_preview(&ext) {
                     preview_status = "pending";
                     needs_job = true;
                 }
@@ -388,7 +383,13 @@ pub async fn index_paths(db: &Database, library_id: &str, paths: &[String]) -> R
         }
     }
 
-    // ── 4. Update asset count ───────────────────────────────────────────
+    // ── 4. Queue previews that older builds never queued ─────────────────
+    let include_python = crate::preview::python_worker_available();
+    if let Err(e) = backfill_missing_previews(&pool, now, include_python).await {
+        tracing::warn!("Preview backfill failed for library {}: {}", library_id, e);
+    }
+
+    // ── 5. Update asset count ───────────────────────────────────────────
     let count_row: Option<(i64,)> = sqlx::query_as("SELECT COUNT(*) FROM assets").fetch_optional(&pool).await?;
     let total_count = count_row.map(|(c,)| c).unwrap_or(0);
 
@@ -406,6 +407,70 @@ pub async fn index_paths(db: &Database, library_id: &str, paths: &[String]) -> R
 
     tracing::info!("NAS-efficient indexing complete for library {}: {} total assets", library_id, total_count);
     Ok(())
+}
+
+/// Queue thumbnail jobs for assets stuck at `preview_status = 'none'`.
+///
+/// Unchanged files are skipped by the walk, so an asset indexed by a build that did not
+/// yet preview its format (e.g. `.png`/`.jpg` before image previews existed) stayed at
+/// `none` forever and never got a thumbnail. This finds those rows and queues them.
+///
+/// Formats rendered in-process by Rust are always backfilled; Python-rendered ones only
+/// when `include_python` (a worker interpreter was found for this run).
+/// Rows in `error` or `done` are left alone. Orphaned job rows are removed too.
+/// Returns the number of jobs queued.
+async fn backfill_missing_previews(
+    pool: &sqlx::Pool<sqlx::Sqlite>,
+    now: i64,
+    include_python: bool,
+) -> Result<u64> {
+    let mut exts: Vec<&str> = crate::preview::rust_preview_exts();
+    if include_python {
+        exts.extend_from_slice(crate::preview::PYTHON_PREVIEW_EXTS);
+    }
+    exts.sort_unstable();
+    exts.dedup();
+    let placeholders = exts.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let stuck = format!(
+        "a.preview_status = 'none' AND a.thumbnail_path IS NULL AND lower(a.extension) IN ({})",
+        placeholders
+    );
+
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("DELETE FROM preview_jobs WHERE asset_id NOT IN (SELECT id FROM assets)")
+        .execute(&mut *tx)
+        .await?;
+
+    let insert_sql = format!(
+        "INSERT INTO preview_jobs (id, asset_id, status, created_at)
+         SELECT lower(hex(randomblob(16))), a.id, 'pending', ? FROM assets a
+         WHERE {} AND NOT EXISTS (SELECT 1 FROM preview_jobs p WHERE p.asset_id = a.id)",
+        stuck
+    );
+    let mut insert = sqlx::query(&insert_sql).bind(now);
+    for e in &exts {
+        insert = insert.bind(*e);
+    }
+    let queued = insert.execute(&mut *tx).await?.rows_affected();
+
+    if queued > 0 {
+        let update_sql = format!(
+            "UPDATE assets SET preview_status = 'pending' WHERE id IN (
+                SELECT a.id FROM assets a WHERE {}
+                AND EXISTS (SELECT 1 FROM preview_jobs p WHERE p.asset_id = a.id AND p.status = 'pending'))",
+            stuck
+        );
+        let mut update = sqlx::query(&update_sql);
+        for e in &exts {
+            update = update.bind(*e);
+        }
+        update.execute(&mut *tx).await?;
+        tracing::info!("Queued {} missing previews", queued);
+    }
+
+    tx.commit().await?;
+    Ok(queued)
 }
 
 /// Helper to execute a batch of assets inside a single database transaction
@@ -560,6 +625,94 @@ mod tests {
         index_paths(&db, "lib-a", &[root_str]).await.unwrap();
         assert_eq!(asset_count(&db, "lib-a").await, 1);
 
+        drop(db);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn write_png(path: &Path) {
+        image::RgbImage::from_pixel(8, 8, image::Rgb([200, 40, 40])).save(path).unwrap();
+    }
+
+    async fn job_count(pool: &sqlx::Pool<sqlx::Sqlite>, file_name: &str) -> i64 {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM preview_jobs p JOIN assets a ON a.id = p.asset_id WHERE a.file_name = ?",
+        )
+        .bind(file_name)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn status_of(pool: &sqlx::Pool<sqlx::Sqlite>, file_name: &str) -> String {
+        sqlx::query_scalar("SELECT preview_status FROM assets WHERE file_name = ?")
+            .bind(file_name)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    /// Reproduces a library indexed by a build that didn't preview images yet: rows saved
+    /// as 'none' with no job, and unchanged files skipped by every later index pass.
+    #[tokio::test]
+    async fn stuck_none_previews_are_backfilled_once() {
+        let base = scratch_dir("backfill");
+        let lib_root = base.join("lib");
+        std::fs::create_dir_all(&lib_root).unwrap();
+        for name in ["stuck.png", "failed.png", "done.png"] {
+            write_png(&lib_root.join(name));
+        }
+        std::fs::write(lib_root.join("notes.txt"), b"hi").unwrap();
+        std::fs::write(lib_root.join("model.obj"), b"v 0 0 0\n").unwrap();
+
+        let db = Database::new(base.join("master.sqlite").to_str().unwrap()).await.unwrap();
+        db.register_library("lib", "L", &lib_root).await.unwrap();
+        let root = lib_root.to_string_lossy().to_string();
+        index_paths(&db, "lib", std::slice::from_ref(&root)).await.unwrap();
+        let pool = db.get_library_handle_exact("lib").await.unwrap().pool;
+
+        // Rewind to the old build's state.
+        sqlx::query("DELETE FROM preview_jobs").execute(&pool).await.unwrap();
+        sqlx::query("UPDATE assets SET preview_status = 'none', thumbnail_path = NULL")
+            .execute(&pool).await.unwrap();
+        sqlx::query("UPDATE assets SET preview_status = 'error' WHERE file_name = 'failed.png'")
+            .execute(&pool).await.unwrap();
+        sqlx::query("UPDATE assets SET preview_status = 'done', thumbnail_path = '.opendam/thumbs/x.png' WHERE file_name = 'done.png'")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO preview_jobs (id, asset_id, status, created_at) VALUES ('orphan', 'gone', 'queued', 0)")
+            .execute(&pool).await.unwrap();
+
+        for _ in 0..2 {
+            index_paths(&db, "lib", std::slice::from_ref(&root)).await.unwrap();
+            assert_eq!(job_count(&pool, "stuck.png").await, 1);
+            assert_eq!(status_of(&pool, "stuck.png").await, "pending");
+        }
+        assert_eq!(job_count(&pool, "failed.png").await, 0);
+        assert_eq!(status_of(&pool, "failed.png").await, "error");
+        assert_eq!(job_count(&pool, "done.png").await, 0);
+        assert_eq!(status_of(&pool, "done.png").await, "done");
+        assert_eq!(job_count(&pool, "notes.txt").await, 0);
+        // Python-only formats are not backfilled (no worker in installed builds).
+        assert_eq!(job_count(&pool, "model.obj").await, 0);
+        assert_eq!(status_of(&pool, "model.obj").await, "none");
+        let orphans: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM preview_jobs WHERE id = 'orphan'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(orphans, 0);
+
+        // With a Python worker available, Python formats are backfilled too (once).
+        for _ in 0..2 {
+            backfill_missing_previews(&pool, 0, true).await.unwrap();
+            assert_eq!(job_count(&pool, "model.obj").await, 1);
+            assert_eq!(status_of(&pool, "model.obj").await, "pending");
+        }
+        assert_eq!(job_count(&pool, "notes.txt").await, 0);
+        assert_eq!(status_of(&pool, "failed.png").await, "error");
+
+        // The queued job is one the native worker path can complete.
+        let thumb = base.join("stuck_thumb.png");
+        crate::preview::generate_image_thumb(&lib_root.join("stuck.png"), &thumb).unwrap();
+        assert!(thumb.exists());
+
+        drop(pool);
         drop(db);
         let _ = std::fs::remove_dir_all(&base);
     }

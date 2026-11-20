@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
-    "build": "tauri build",
+    "bundle:python": "python ../../tools/bundle-python/bundle_python.py",
+    "build": "pnpm bundle:python && tauri build --config src-tauri/tauri.bundle-python.conf.json",
+    "build:lite": "tauri build",
     "preview": "vite preview",
     "vite:dev": "vite",
     "vite:build": "tsc -b && vite build",

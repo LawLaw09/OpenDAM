@@ -35,6 +35,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dirs = "5"
 trash = "5"
+cfb = "0.7"  # OLE compound files: embedded previews in .max / .rvt / .rfa
+png = "0.18" # same version `image` uses; needed to read thumbnails with bad CRCs
+flate2 = "1" # already in the dependency tree; salvages damaged embedded PNGs
 
 [profile.release]
 panic = "abort"

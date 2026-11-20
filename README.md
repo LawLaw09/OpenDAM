@@ -118,6 +118,10 @@ pnpm --filter @opendam/desktop build
 The compiled installer will be available at:
 `apps/desktop/src-tauri/target/release/bundle/nsis/OpenDAM_0.1.0_x64-setup.exe`
 
+The build first runs `tools/bundle-python/bundle_python.py`, which packs a **private, isolated Python** (the Windows embeddable distribution + the preview worker's pinned packages) into the installer for 3D/CAD/PSD previews. It never touches a Python you have installed: nothing is written to the registry or PATH, and the bundled interpreter ignores `PYTHONPATH`/`PYTHONHOME` and user site-packages. Images, EXR and HDR are rendered natively in Rust and need no Python at all.
+
+`pnpm --filter @opendam/desktop build:lite` builds without the bundled Python (smaller installer; 3D/CAD previews then wait until a worker is available). The portable `.exe` carries no bundled Python either.
+
 ---
 
 ## 🗺️ Project Roadmap

@@ -1,0 +1,23 @@
+# Packages shipped inside the installer's private Python (see bundle_python.py).
+# Only what packages/preview-engine/worker.py actually imports, pinned to the
+# versions the dev venv was verified with. Heavy optional trimesh extras
+# (scipy, shapely, rtree, embree, OpenCV, OpenImageIO...) are deliberately left out.
+pillow==12.3.0          # PSD, embedded previews, image I/O
+olefile==0.47           # .max / .rfa / .rvt embedded thumbnails (OLE storage)
+numpy==2.5.3
+trimesh==5.1.0          # mesh loading, GLB export
+networkx==3.6.1         # trimesh graph engine: without it save_image() renders blank
+                        # snapshots (smooth shading fails and geometry is dropped)
+pyglet==1.5.31          # trimesh scene.save_image() snapshot rendering (needs <2)
+pycollada==0.9.3        # .dae loading via trimesh
+python-dateutil==4.0.0  # pycollada date/time helpers
+tzdata==2026.6          # bundled timezone database used by python-dateutil
+assimp_py==1.2.0        # .fbx / .3ds
+rhino3dm==8.32.1        # .3dm
+pypdfium2==5.13.0       # .ai (PDF-compatible) previews
+imageio==2.37.4         # HDR fallback. Note: without OpenCV (~60 MB, left out) imageio
+                        # can't read .hdr here; Rust decodes .hdr natively, so the app never
+                        # reaches this path unless the native decode fails.
+imath==0.0.2            # OpenEXR dependency
+OpenEXR==3.4.15         # EXR fallback (Rust decodes EXR natively first)
+openexr_numpy==0.0.8

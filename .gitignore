@@ -88,3 +88,7 @@ Desktop.ini
 .DS_Store
 .Spotlight-V100
 .Trashes
+
+# Private Python runtime for the installer (built by tools/bundle-python)
+apps/desktop/src-tauri/resources/preview-engine/
+tools/bundle-python/.cache/
